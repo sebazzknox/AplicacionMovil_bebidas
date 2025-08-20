@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
 import 'comercios_page.dart';
+import 'ofertas_page.dart';
+import 'comercios_mock_page.dart';
+
+// 👇 NUEVO: imports para login real
+import 'package:firebase_auth/firebase_auth.dart';
 
 class HomeLandingPage extends StatelessWidget {
   const HomeLandingPage({super.key});
@@ -32,12 +37,12 @@ class HomeLandingPage extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Buscador "dummy" → abre la lista con foco
+                  // Buscador "dummy" → abre lista de comercios
                   TextField(
                     readOnly: true,
                     onTap: () => Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (_) => const ComerciosPage()),
+                      MaterialPageRoute(builder: (_) => const ComerciosPage()), //Con esto se guardan datos en el firebase
                     ),
                     decoration: InputDecoration(
                       hintText: 'Provincia, ciudad o comercio',
@@ -62,24 +67,25 @@ class HomeLandingPage extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 12),
+
                   _ActionCard(
                     icon: Icons.local_offer_outlined,
                     title: 'Ofertas',
-                    subtitle: 'Promos destacadas (próximamente)',
-                    onTap: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Próximamente ✨')),
-                      );
-                    },
+                    subtitle: 'Promos destacadas',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const OfertasPage()),
+                    ),
                   ),
                   const SizedBox(height: 12),
+
                   _ActionCard(
                     icon: Icons.map_outlined,
                     title: 'Mapa',
                     subtitle: 'Ver comercios en el mapa (próximamente)',
                     onTap: () {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Próximamente ✨')),
+                        const SnackBar(content: Text('Mapa: próximamente ✨')),
                       );
                     },
                   ),
@@ -101,9 +107,11 @@ class HomeLandingPage extends StatelessWidget {
     );
   }
 
-  // Sheet con login simple de admin (PIN) – luego lo cambiamos por Firebase Auth
+  // ========= LOGIN ADMIN (Email/Contraseña con Firebase Auth) =========
   void _showAdminLogin(BuildContext context) {
-    final pinCtrl = TextEditingController();
+    final emailCtrl = TextEditingController();
+    final passCtrl  = TextEditingController();
+    final auth = FirebaseAuth.instance;
 
     showModalBottomSheet(
       context: context,
@@ -122,16 +130,26 @@ class HomeLandingPage extends StatelessWidget {
               const ListTile(
                 leading: Icon(Icons.admin_panel_settings_outlined),
                 title: Text('Acceso administrador'),
-                subtitle: Text('Ingresá tu PIN para gestionar bebidas'),
+                subtitle: Text('Ingresá tu email y contraseña'),
               ),
               TextField(
-                controller: pinCtrl,
-                obscureText: true,
-                keyboardType: TextInputType.number,
+                controller: emailCtrl,
+                keyboardType: TextInputType.emailAddress,
+                textInputAction: TextInputAction.next,
                 decoration: const InputDecoration(
-                  labelText: 'PIN',
-                  prefixIcon: Icon(Icons.password_outlined),
+                  labelText: 'Email',
+                  prefixIcon: Icon(Icons.email_outlined),
                 ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: passCtrl,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'Contraseña',
+                  prefixIcon: Icon(Icons.lock_outline),
+                ),
+                onSubmitted: (_) {}, // para cerrar el teclado cómodamente
               ),
               const SizedBox(height: 12),
               Row(
@@ -144,24 +162,28 @@ class HomeLandingPage extends StatelessWidget {
                   FilledButton.icon(
                     icon: const Icon(Icons.login),
                     label: const Text('Ingresar'),
-                    onPressed: () {
-                      // ⚠️ PIN provisorio: cambiamos luego por Firebase Auth
-                      const pinValido = '1234';
-                      if (pinCtrl.text.trim() == pinValido) {
-                        Navigator.pop(ctx); // cerramos el sheet
-                        // Marcamos admin via argumento de ruta o provider simple
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const ComerciosPage(), // abre lista
-                          ),
+                    onPressed: () async {
+                      try {
+                        await auth.signInWithEmailAndPassword(
+                          email: emailCtrl.text.trim(),
+                          password: passCtrl.text.trim(),
                         );
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Modo admin activado')),
-                        );
-                      } else {
+                        if (ctx.mounted) Navigator.pop(ctx);
+                        if (context.mounted) {
+                          // Al entrar, lo mandamos a la lista (con FAB y opciones de admin)
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const ComerciosPage(),
+                            ),
+                          );
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Modo admin activado')),
+                          );
+                        }
+                      } catch (e) {
                         ScaffoldMessenger.of(ctx).showSnackBar(
-                          const SnackBar(content: Text('PIN incorrecto')),
+                          SnackBar(content: Text('Error de login: $e')),
                         );
                       }
                     },

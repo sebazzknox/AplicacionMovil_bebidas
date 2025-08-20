@@ -1,5 +1,10 @@
+import 'dart:io';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+
 import 'comercio_detalle_page.dart';
 import 'bebidas_page.dart'; // 👈 para abrir el CRUD de bebidas
 
@@ -16,6 +21,10 @@ class ComerciosPage extends StatefulWidget {
 class _ComerciosPageState extends State<ComerciosPage> {
   final _busquedaCtrl = TextEditingController();
   String _query = '';
+
+  // Picker y foto temporal (para crear/editar)
+  final _picker = ImagePicker();
+  XFile? _fotoTmp;
 
   @override
   void dispose() {
@@ -188,6 +197,24 @@ class _ComerciosPageState extends State<ComerciosPage> {
                                         );
                                       },
                                     ),
+                                  if (kIsAdmin)
+                                    PopupMenuButton<String>(
+                                      onSelected: (v) async {
+                                        if (v == 'edit') {
+                                          _abrirFormComercio(doc: doc);
+                                        } else if (v == 'delete') {
+                                          final ok = await _confirmarBorrado(context, nombre);
+                                          if (ok) {
+                                            await _deleteFotoByPath(data['fotoPath'] as String?);
+                                            await doc.reference.delete();
+                                          }
+                                        }
+                                      },
+                                      itemBuilder: (_) => const [
+                                        PopupMenuItem(value: 'edit', child: Text('Editar')),
+                                        PopupMenuItem(value: 'delete', child: Text('Eliminar')),
+                                      ],
+                                    ),
                                   const Icon(Icons.chevron_right),
                                 ],
                               ),
@@ -203,6 +230,203 @@ class _ComerciosPageState extends State<ComerciosPage> {
           ),
         ],
       ),
+
+      // FAB sólo visible para admin
+      floatingActionButton: kIsAdmin
+          ? FloatingActionButton.extended(
+              onPressed: () => _abrirFormComercio(),
+              icon: const Icon(Icons.add_business),
+              label: const Text('Nuevo comercio'),
+            )
+          : null,
+    );
+  }
+
+  // ========= Helpers de imagen/Storage =========
+  Future<void> _pickFoto(StateSetter setLocal) async {
+    final x = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 75);
+    if (x != null) setLocal(() => _fotoTmp = x);
+  }
+
+  Future<({String url, String path})?> _uploadFoto(String comercioId) async {
+    if (_fotoTmp == null) return null;
+    final file = File(_fotoTmp!.path);
+    final path = 'comercios/$comercioId/foto.jpg';
+    final ref = FirebaseStorage.instance.ref().child(path);
+    await ref.putFile(file, SettableMetadata(contentType: 'image/jpeg'));
+    final url = await ref.getDownloadURL();
+    return (url: url, path: path);
+  }
+
+  Future<void> _deleteFotoByPath(String? path) async {
+    if (path == null || path.isEmpty) return;
+    try { await FirebaseStorage.instance.ref().child(path).delete(); } catch (_) {}
+  }
+
+  // ========= Confirmar borrado =========
+  Future<bool> _confirmarBorrado(BuildContext context, String nombre) async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Confirmar borrado'),
+            content: Text('¿Eliminar "$nombre"? Esta acción no se puede deshacer.'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+              FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Eliminar')),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
+  // ========= Formulario (crear / editar) =========
+  Future<void> _abrirFormComercio({DocumentSnapshot<Map<String, dynamic>>? doc}) async {
+    final isEdit = doc != null;
+    final data   = doc?.data();
+
+    final nombreCtrl    = TextEditingController(text: data?['nombre'] ?? '');
+    final ciudadCtrl    = TextEditingController(text: data?['ciudad'] ?? '');
+    final provinciaCtrl = TextEditingController(text: data?['provincia'] ?? '');
+
+    String? fotoUrlPreview = data?['fotoUrl'] as String?;
+    _fotoTmp = null;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          title: Text(isEdit ? 'Editar comercio' : 'Nuevo comercio'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // preview + selector
+                GestureDetector(
+                  onTap: () => _pickFoto(setLocal),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: SizedBox(
+                      width: 120,
+                      height: 120,
+                      child: _fotoTmp != null
+                          ? Image.file(File(_fotoTmp!.path), fit: BoxFit.cover)
+                          : (fotoUrlPreview != null && fotoUrlPreview!.isNotEmpty)
+                              ? Image.network(fotoUrlPreview!, fit: BoxFit.cover)
+                              : Container(
+                                  color: Colors.black12,
+                                  child: const Icon(Icons.add_a_photo, size: 36),
+                                ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                if (_fotoTmp != null || (fotoUrlPreview ?? '').isNotEmpty)
+                  TextButton.icon(
+                    onPressed: () => setLocal(() {
+                      _fotoTmp = null;
+                      fotoUrlPreview = null;
+                    }),
+                    icon: const Icon(Icons.delete_outline),
+                    label: const Text('Quitar foto'),
+                  ),
+                const SizedBox(height: 8),
+
+                TextField(
+                  controller: nombreCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Nombre del comercio',
+                    prefixIcon: Icon(Icons.storefront),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: ciudadCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Ciudad',
+                    prefixIcon: Icon(Icons.location_city),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: provinciaCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Provincia',
+                    prefixIcon: Icon(Icons.map_outlined),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Guardar')),
+          ],
+        ),
+      ),
+    ) ?? false;
+
+    if (!ok) {
+      setState(() => _fotoTmp = null);
+      return;
+    }
+
+    final nombre    = nombreCtrl.text.trim();
+    final ciudad    = ciudadCtrl.text.trim();
+    final provincia = provinciaCtrl.text.trim();
+
+    if (nombre.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Poné un nombre')));
+      return;
+    }
+
+    final payload = <String, dynamic>{
+      'nombre': nombre,
+      'ciudad': ciudad,
+      'provincia': provincia,
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+
+    final col = FirebaseFirestore.instance.collection('comercios');
+
+    try {
+      if (isEdit) {
+        await doc!.reference.update(payload);
+
+        // Nueva foto elegida → subir y reemplazar
+        if (_fotoTmp != null) {
+          await _deleteFotoByPath(data?['fotoPath'] as String?);
+          final up = await _uploadFoto(doc.id);
+          if (up != null) {
+            await doc.reference.update({'fotoUrl': up.url, 'fotoPath': up.path});
+          }
+        } else if ((fotoUrlPreview ?? '').isEmpty && (data?['fotoPath'] != null)) {
+          // Quitó la foto existente
+          await _deleteFotoByPath(data?['fotoPath'] as String?);
+          await doc.reference.update({
+            'fotoUrl': FieldValue.delete(),
+            'fotoPath': FieldValue.delete(),
+          });
+        }
+      } else {
+        // Crear
+        final newRef = await col.add({
+          ...payload,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+
+        if (_fotoTmp != null) {
+          final up = await _uploadFoto(newRef.id);
+          if (up != null) {
+            await newRef.update({'fotoUrl': up.url, 'fotoPath': up.path});
+          }
+        }
+      }
+    } finally {
+      setState(() => _fotoTmp = null);
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(isEdit ? 'Comercio actualizado' : 'Comercio creado')),
     );
   }
 }
