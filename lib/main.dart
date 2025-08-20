@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-
+import 'home_landing_page.dart';
 import 'comercios_page.dart';
 import 'bebidas_page.dart';
+
+
+
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,9 +26,9 @@ class MyApp extends StatelessWidget {
         colorSchemeSeed: Colors.deepPurple,
       ),
       // 👉 Dejamos como pantalla inicial la lista de comercios
-      home: const ComerciosPage(),
+      home: const HomeLandingPage(),
       routes: {
-        '/bebidas': (_) => const BebidasPage(),
+        '/comercios': (_) => const ComerciosPage(),
       },
     );
   }

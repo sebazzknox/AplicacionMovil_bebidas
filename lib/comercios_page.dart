@@ -1,6 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'comercio_detalle_page.dart';
+import 'bebidas_page.dart'; // 👈 para abrir el CRUD de bebidas
+
+// Cambiá a true para ver las opciones de admin en la lista
+const bool kIsAdmin = true;
 
 class ComerciosPage extends StatefulWidget {
   const ComerciosPage({super.key});
@@ -104,7 +108,7 @@ class _ComerciosPageState extends State<ComerciosPage> {
                       child: InkWell(
                         borderRadius: BorderRadius.circular(16),
                         onTap: () {
-                          // 👉 Navegamos pasando el ID del comercio
+                          // 👉 Navegamos al detalle público del comercio
                           Navigator.push(
                             context,
                             MaterialPageRoute(
@@ -148,10 +152,45 @@ class _ComerciosPageState extends State<ComerciosPage> {
                                         subt,
                                         style: Theme.of(context).textTheme.bodySmall,
                                       ),
+                                    if (kIsAdmin)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 6),
+                                        child: Text(
+                                          'ADMIN',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .labelSmall
+                                              ?.copyWith(color: Colors.deepPurple),
+                                        ),
+                                      ),
                                   ],
                                 ),
                               ),
-                              const Icon(Icons.chevron_right),
+
+                              // 👉 Acciones
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  // Botón gestionar (CRUD) sólo para admin
+                                  if (kIsAdmin)
+                                    IconButton(
+                                      tooltip: 'Gestionar bebidas',
+                                      icon: const Icon(Icons.build_circle_outlined),
+                                      onPressed: () {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) => BebidasPage(
+                                              initialComercioId: doc.id,
+                                              initialComercioNombre: nombre,
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  const Icon(Icons.chevron_right),
+                                ],
+                              ),
                             ],
                           ),
                         ),
