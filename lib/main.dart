@@ -3,7 +3,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'home_landing_page.dart';
 import 'comercios_page.dart';
 import 'bebidas_page.dart';
-
+import 'splash_screen.dart';
 
 
 
@@ -26,7 +26,7 @@ class MyApp extends StatelessWidget {
         colorSchemeSeed: Colors.deepPurple,
       ),
       // 👉 Dejamos como pantalla inicial la lista de comercios
-      home: const HomeLandingPage(),
+      home: const SplashScreen(),
       routes: {
         '/comercios': (_) => const ComerciosPage(),
       },

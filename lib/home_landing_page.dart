@@ -2,9 +2,13 @@ import 'package:flutter/material.dart';
 import 'comercios_page.dart';
 import 'ofertas_page.dart';
 import 'comercios_mock_page.dart';
+import 'comercios_page.dart' as cp;
+import 'admin_state.dart';
+// 👇 acceso al panel
+import 'admin_panel_page.dart';
 
-// 👇 NUEVO: imports para login real
-import 'package:firebase_auth/firebase_auth.dart';
+// PIN de administrador (podés cambiarlo cuando quieras)
+const String kAdminPin = '1234';
 
 class HomeLandingPage extends StatelessWidget {
   const HomeLandingPage({super.key});
@@ -37,12 +41,12 @@ class HomeLandingPage extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Buscador "dummy" → abre lista de comercios
+                  // Buscador
                   TextField(
                     readOnly: true,
                     onTap: () => Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (_) => const ComerciosPage()), //Con esto se guardan datos en el firebase
+                      MaterialPageRoute(builder: (_) => const ComerciosPage()),
                     ),
                     decoration: InputDecoration(
                       hintText: 'Provincia, ciudad o comercio',
@@ -56,7 +60,6 @@ class HomeLandingPage extends StatelessWidget {
                   ),
                   const SizedBox(height: 24),
 
-                  // Acciones principales
                   _ActionCard(
                     icon: Icons.store_mall_directory_outlined,
                     title: 'Explorar comercios',
@@ -90,7 +93,31 @@ class HomeLandingPage extends StatelessWidget {
                     },
                   ),
 
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 12),
+
+                  // 👇 ahora lo envolvemos con ValueListenableBuilder
+                  ValueListenableBuilder<bool>(
+                    valueListenable: adminMode,
+                    builder: (context, isAdmin, _) {
+                      if (!isAdmin) return const SizedBox.shrink();
+                      return Column(
+                        children: [
+                          _ActionCard(
+                            icon: Icons.space_dashboard_outlined,
+                            title: 'Panel de administración',
+                            subtitle: 'Comercios · Ofertas · Stock · Finanzas',
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) => const AdminPanelPage()),
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                        ],
+                      );
+                    },
+                  ),
+
                   Center(
                     child: TextButton.icon(
                       onPressed: () => _showAdminLogin(context),
@@ -107,11 +134,62 @@ class HomeLandingPage extends StatelessWidget {
     );
   }
 
-  // ========= LOGIN ADMIN (Email/Contraseña con Firebase Auth) =========
+  // ========= LOGIN ADMIN por PIN =========
   void _showAdminLogin(BuildContext context) {
-    final emailCtrl = TextEditingController();
-    final passCtrl  = TextEditingController();
-    final auth = FirebaseAuth.instance;
+    if (adminMode.value == true || cp.kIsAdmin) {
+      showModalBottomSheet(
+        context: context,
+        builder: (ctx) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const ListTile(
+                leading: Icon(Icons.verified_user_outlined),
+                title: Text('Sesión iniciada'),
+                subtitle: Text('Ya estás en modo administrador'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.logout),
+                title: const Text('Salir de administrador'),
+                onTap: () {
+                  adminMode.value = false;
+                  cp.kIsAdmin = false;
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Modo admin desactivado')),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      );
+      return;
+    }
+
+    final pinCtrl = TextEditingController();
+
+    Future<void> tryLogin(BuildContext ctx) async {
+      final pin = pinCtrl.text.trim();
+      if (pin == kAdminPin) {
+        adminMode.value = true;
+        cp.kIsAdmin = true;
+        if (ctx.mounted) Navigator.pop(ctx);
+        if (context.mounted) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const ComerciosPage()),
+          );
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Modo admin activado')),
+          );
+        }
+      } else {
+        ScaffoldMessenger.of(ctx).showSnackBar(
+          const SnackBar(content: Text('PIN incorrecto')),
+        );
+      }
+    }
 
     showModalBottomSheet(
       context: context,
@@ -130,26 +208,18 @@ class HomeLandingPage extends StatelessWidget {
               const ListTile(
                 leading: Icon(Icons.admin_panel_settings_outlined),
                 title: Text('Acceso administrador'),
-                subtitle: Text('Ingresá tu email y contraseña'),
+                subtitle: Text('Ingresá tu PIN para gestionar'),
               ),
               TextField(
-                controller: emailCtrl,
-                keyboardType: TextInputType.emailAddress,
-                textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(
-                  labelText: 'Email',
-                  prefixIcon: Icon(Icons.email_outlined),
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: passCtrl,
+                controller: pinCtrl,
                 obscureText: true,
+                keyboardType: TextInputType.number,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => tryLogin(ctx),
                 decoration: const InputDecoration(
-                  labelText: 'Contraseña',
-                  prefixIcon: Icon(Icons.lock_outline),
+                  labelText: 'PIN',
+                  prefixIcon: Icon(Icons.password_outlined),
                 ),
-                onSubmitted: (_) {}, // para cerrar el teclado cómodamente
               ),
               const SizedBox(height: 12),
               Row(
@@ -162,31 +232,7 @@ class HomeLandingPage extends StatelessWidget {
                   FilledButton.icon(
                     icon: const Icon(Icons.login),
                     label: const Text('Ingresar'),
-                    onPressed: () async {
-                      try {
-                        await auth.signInWithEmailAndPassword(
-                          email: emailCtrl.text.trim(),
-                          password: passCtrl.text.trim(),
-                        );
-                        if (ctx.mounted) Navigator.pop(ctx);
-                        if (context.mounted) {
-                          // Al entrar, lo mandamos a la lista (con FAB y opciones de admin)
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const ComerciosPage(),
-                            ),
-                          );
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Modo admin activado')),
-                          );
-                        }
-                      } catch (e) {
-                        ScaffoldMessenger.of(ctx).showSnackBar(
-                          SnackBar(content: Text('Error de login: $e')),
-                        );
-                      }
-                    },
+                    onPressed: () => tryLogin(ctx),
                   ),
                 ],
               ),
@@ -234,11 +280,9 @@ class _ActionCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title,
-                        style: Theme.of(context).textTheme.titleMedium),
+                    Text(title, style: Theme.of(context).textTheme.titleMedium),
                     const SizedBox(height: 4),
-                    Text(subtitle,
-                        style: Theme.of(context).textTheme.bodySmall),
+                    Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
                   ],
                 ),
               ),

@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 import 'bebidas_page.dart';
+import 'stock_page.dart'; // 👈 NUEVO: para navegar al stock
 import 'comercios_page.dart' show kIsAdmin; // para mostrar/ocultar Editar
 
 class ComercioDetallePage extends StatelessWidget {
@@ -25,26 +26,25 @@ class ComercioDetallePage extends StatelessWidget {
           );
         }
         final data = snap.data!.data();
-       if (data == null) {
-  return Scaffold(
-    appBar: AppBar(title: const Text('Comercio')),
-    body: Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Text('Comercio no encontrado'),
-          const SizedBox(height: 12),
-          FilledButton.icon(
-            onPressed: () => Navigator.pop(context),
-            icon: const Icon(Icons.arrow_back),
-            label: const Text('Volver'),
-          ),
-        ],
-      ),
-    ),
-  );
-}
-      
+        if (data == null) {
+          return Scaffold(
+            appBar: AppBar(title: const Text('Comercio')),
+            body: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Comercio no encontrado'),
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.arrow_back),
+                    label: const Text('Volver'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
 
         final nombre = (data['nombre'] ?? '') as String;
         final fotoUrl = data['fotoUrl'] as String?;
@@ -93,10 +93,12 @@ class ComercioDetallePage extends StatelessWidget {
               const SizedBox(height: 16),
 
               // Nombre + ciudad/provincia
-              Text(nombre,
-                  style: Theme.of(context).textTheme.headlineSmall,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis),
+              Text(
+                nombre,
+                style: Theme.of(context).textTheme.headlineSmall,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
               if (subt.isNotEmpty) ...[
                 const SizedBox(height: 4),
                 Text(subt, style: Theme.of(context).textTheme.bodyMedium),
@@ -132,8 +134,7 @@ class ComercioDetallePage extends StatelessWidget {
                       onTap: () {
                         final telClean =
                             telefono.replaceAll(RegExp(r'[^0-9+]'), '');
-                        final url =
-                            Uri.parse('https://wa.me/$telClean'); // chat directo
+                        final url = Uri.parse('https://wa.me/$telClean'); // chat directo
                         _launchUri(url);
                       },
                     ),
@@ -168,7 +169,9 @@ class ComercioDetallePage extends StatelessWidget {
                         // si hay lat/lng, priorizamos geo URI; si no, buscamos por dirección
                         final uri = (lat != null && lng != null)
                             ? Uri.parse('geo:$lat,$lng?q=$lat,$lng($nombre)')
-                            : Uri.parse('https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(direccion!)}');
+                            : Uri.parse(
+                                'https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(direccion!)}',
+                              );
                         _launchUri(uri);
                       },
                     ),
@@ -193,6 +196,25 @@ class ComercioDetallePage extends StatelessWidget {
                   );
                 },
               ),
+
+              const SizedBox(height: 10),
+
+              // 👇 NUEVO: Ver stock del comercio (visible para todos)
+              FilledButton.tonalIcon(
+                icon: const Icon(Icons.inventory_2_outlined),
+                label: const Text('Ver stock'),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => StockPage(
+                        comercioId: comercioId,
+                        comercioNombre: nombre,
+                      ),
+                    ),
+                  );
+                },
+              ),
             ],
           ),
         );
@@ -203,13 +225,15 @@ class ComercioDetallePage extends StatelessWidget {
   // ------- Helpers -------
   static Future<void> _launchUri(Uri uri) async {
     if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-      // ignore: use_build_context_synchronously
-      // no context acá; normalmente mostraría SnackBar desde caller
+      // normalmente mostraría SnackBar desde caller
     }
   }
 
-  Future<void> _editarComercio(BuildContext context,
-      DocumentReference<Map<String, dynamic>> docRef, Map<String, dynamic> data) async {
+  Future<void> _editarComercio(
+    BuildContext context,
+    DocumentReference<Map<String, dynamic>> docRef,
+    Map<String, dynamic> data,
+  ) async {
     final nombreCtrl =
         TextEditingController(text: (data['nombre'] ?? '').toString());
     final ciudadCtrl =
@@ -248,15 +272,25 @@ class ComercioDetallePage extends StatelessWidget {
                   Row(
                     children: [
                       Expanded(
-                        child: _tf(latCtrl, 'Lat', Icons.my_location,
-                            keyboard:
-                                const TextInputType.numberWithOptions(decimal: true)),
+                        child: _tf(
+                          latCtrl,
+                          'Lat',
+                          Icons.my_location,
+                          keyboard: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                        ),
                       ),
                       const SizedBox(width: 8),
                       Expanded(
-                        child: _tf(lngCtrl, 'Lng', Icons.my_location_outlined,
-                            keyboard:
-                                const TextInputType.numberWithOptions(decimal: true)),
+                        child: _tf(
+                          lngCtrl,
+                          'Lng',
+                          Icons.my_location_outlined,
+                          keyboard: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -264,8 +298,14 @@ class ComercioDetallePage extends StatelessWidget {
               ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
-              FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Guardar')),
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Guardar'),
+              ),
             ],
           ),
         ) ??
@@ -290,8 +330,12 @@ class ComercioDetallePage extends StatelessWidget {
         .showSnackBar(const SnackBar(content: Text('Cambios guardados')));
   }
 
-  static Widget _tf(TextEditingController c, String label, IconData icon,
-      {TextInputType? keyboard}) {
+  static Widget _tf(
+    TextEditingController c,
+    String label,
+    IconData icon, {
+    TextInputType? keyboard,
+  }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: TextField(

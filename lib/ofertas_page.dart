@@ -19,12 +19,33 @@ class _OfertasPageState extends State<OfertasPage> {
   final _picker = ImagePicker();
   XFile? _fotoTmp;
 
+  // ====== NUEVO (Punto 4): Filtros ======
+  String? _filtroComercioId;
+  String? _filtroComercioNombre;
+  bool _soloActivas = false;
+
   @override
   Widget build(BuildContext context) {
     final col = FirebaseFirestore.instance.collection('ofertas');
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Ofertas')),
+      appBar: AppBar(
+        title: const Text('Ofertas'),
+        actions: [
+          // Limpia filtros si hay alguno activo
+          if ((_filtroComercioId?.isNotEmpty ?? false) || _soloActivas)
+            IconButton(
+              tooltip: 'Limpiar filtros',
+              onPressed: () => setState(() {
+                _filtroComercioId = null;
+                _filtroComercioNombre = null;
+                _soloActivas = false;
+              }),
+              icon: const Icon(Icons.filter_alt_off),
+            ),
+        ],
+      ),
+
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
         // ✅ Un solo orderBy para NO requerir índice compuesto
         stream: col.orderBy('fin', descending: true).snapshots(),
@@ -35,9 +56,42 @@ class _OfertasPageState extends State<OfertasPage> {
           if (snap.hasError) {
             return Center(child: Text('Error: ${snap.error}'));
           }
-          final docs = (snap.data?.docs ?? []).toList();
+          final docsAll = (snap.data?.docs ?? []).toList();
+
+          // ====== NUEVO: filtros en memoria ======
+          List<DocumentSnapshot<Map<String, dynamic>>> docs = docsAll.where((d) {
+            final data = d.data() ?? {};
+            final activa = (data['activa'] ?? true) == true;
+            final comercioId = data['comercioId'] as String?;
+            if (_soloActivas && !activa) return false;
+            if ((_filtroComercioId?.isNotEmpty ?? false) &&
+                comercioId != _filtroComercioId) return false;
+            return true;
+          }).toList();
+
           if (docs.isEmpty) {
-            return const Center(child: Text('Aún no hay ofertas.'));
+            return Column(
+              children: [
+                // ====== NUEVO: barra de filtros arriba ======
+                _FiltrosBar(
+                  filtroComercioNombre: _filtroComercioNombre,
+                  soloActivas: _soloActivas,
+                  onElegirComercio: () async {
+                    final picked = await _seleccionarComercio(context);
+                    if (picked != null) {
+                      setState(() {
+                        _filtroComercioId = picked['id'];
+                        _filtroComercioNombre = picked['nombre'];
+                      });
+                    }
+                  },
+                  onToggleActivas: (v) => setState(() => _soloActivas = v),
+                ),
+                const Expanded(
+                  child: Center(child: Text('No hay ofertas para los filtros elegidos.')),
+                ),
+              ],
+            );
           }
 
           // ✅ Reordenamos en memoria: activas primero, luego por fin desc
@@ -53,129 +107,158 @@ class _OfertasPageState extends State<OfertasPage> {
             return finOf(b).compareTo(finOf(a)); // 'fin' desc
           });
 
-          return ListView.separated(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-            itemCount: docs.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 10),
-            itemBuilder: (context, i) {
-              final d = docs[i];
-              final data = d.data()!;
-              final titulo = (data['titulo'] ?? '') as String;
-              final desc   = (data['descripcion'] ?? '') as String;
-              final foto   = data['fotoUrl'] as String?;
-              final activa = (data['activa'] ?? true) as bool;
-              final comercioId = data['comercioId'] as String?;
-              final finTs = data['fin'] as Timestamp?;
-              final finStr = finTs != null ? _fmtFecha(finTs.toDate()) : '—';
+          return Column(
+            children: [
+              // ====== NUEVO: barra de filtros arriba ======
+              _FiltrosBar(
+                filtroComercioNombre: _filtroComercioNombre,
+                soloActivas: _soloActivas,
+                onElegirComercio: () async {
+                  final picked = await _seleccionarComercio(context);
+                  if (picked != null) {
+                    setState(() {
+                      _filtroComercioId = picked['id'];
+                      _filtroComercioNombre = picked['nombre'];
+                    });
+                  }
+                },
+                onToggleActivas: (v) => setState(() => _soloActivas = v),
+              ),
 
-              return Material(
-                color: Theme.of(context).colorScheme.surface,
-                borderRadius: BorderRadius.circular(16),
-                elevation: 0.5,
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(16),
-                  onTap: comercioId == null
-                      ? null
-                      : () => Navigator.push(
+              Expanded(
+                child: ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                  itemCount: docs.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 10),
+                  itemBuilder: (context, i) {
+                    final d = docs[i];
+                    final data = d.data()!;
+                    final titulo = (data['titulo'] ?? '') as String;
+                    final desc   = (data['descripcion'] ?? '') as String;
+                    final foto   = data['fotoUrl'] as String?;
+                    final activa = (data['activa'] ?? true) as bool;
+                    final comercioId = data['comercioId'] as String?;
+                    final finTs = data['fin'] as Timestamp?;
+                    final finStr = finTs != null ? _fmtFecha(finTs.toDate()) : '—';
+
+                    return Material(
+                      color: Theme.of(context).colorScheme.surface,
+                      borderRadius: BorderRadius.circular(16),
+                      elevation: 0.5,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(16),
+                        onTap: () {
+                          if (comercioId == null) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Esta oferta no tiene un comercio vinculado.')),
+                            );
+                            return;
+                          }
+                          Navigator.push(
                             context,
                             MaterialPageRoute(
                               builder: (_) =>
                                   ComercioDetallePage(comercioId: comercioId),
                             ),
-                          ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: SizedBox(
-                            width: 84,
-                            height: 84,
-                            child: (foto == null || foto.isEmpty)
-                                ? Container(
-                                    color: Colors.black12,
-                                    child: const Icon(Icons.local_offer, size: 32),
-                                  )
-                                : Image.network(foto, fit: BoxFit.cover),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
+                          );
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      titulo,
-                                      style: Theme.of(context).textTheme.titleMedium,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                  if (kIsAdmin)
-                                    PopupMenuButton<String>(
-                                      onSelected: (v) async {
-                                        if (v == 'edit') {
-                                          _abrirFormOferta(doc: d);
-                                        } else if (v == 'delete') {
-                                          final ok = await _confirmarBorrado(context, titulo);
-                                          if (ok) {
-                                            await _deleteFotoByPath(data['fotoPath'] as String?);
-                                            await d.reference.delete();
-                                          }
-                                        }
-                                      },
-                                      itemBuilder: (_) => const [
-                                        PopupMenuItem(value: 'edit', child: Text('Editar')),
-                                        PopupMenuItem(value: 'delete', child: Text('Eliminar')),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: SizedBox(
+                                  width: 84,
+                                  height: 84,
+                                  child: (foto == null || foto.isEmpty)
+                                      ? Container(
+                                          color: Colors.black12,
+                                          child: const Icon(Icons.local_offer, size: 32),
+                                        )
+                                      : Image.network(foto, fit: BoxFit.cover),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            titulo,
+                                            style: Theme.of(context).textTheme.titleMedium,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        if (kIsAdmin)
+                                          PopupMenuButton<String>(
+                                            onSelected: (v) async {
+                                              if (v == 'edit') {
+                                                _abrirFormOferta(doc: d);
+                                              } else if (v == 'delete') {
+                                                final ok = await _confirmarBorrado(context, titulo);
+                                                if (ok) {
+                                                  await _deleteFotoByPath(data['fotoPath'] as String?);
+                                                  await d.reference.delete();
+                                                }
+                                              }
+                                            },
+                                            itemBuilder: (_) => const [
+                                              PopupMenuItem(value: 'edit', child: Text('Editar')),
+                                              PopupMenuItem(value: 'delete', child: Text('Eliminar')),
+                                            ],
+                                          ),
                                       ],
                                     ),
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              if (desc.isNotEmpty)
-                                Text(
-                                  desc,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
+                                    const SizedBox(height: 4),
+                                    if (desc.isNotEmpty)
+                                      Text(
+                                        desc,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    const SizedBox(height: 6),
+                                    Row(
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: activa
+                                                ? Colors.green.withOpacity(.15)
+                                                : Colors.grey.withOpacity(.2),
+                                            borderRadius: BorderRadius.circular(999),
+                                          ),
+                                          child: Text(
+                                            activa ? 'Activa' : 'Finalizada',
+                                            style: Theme.of(context).textTheme.labelSmall,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text('Hasta $finStr',
+                                            style: Theme.of(context).textTheme.bodySmall),
+                                      ],
+                                    ),
+                                  ],
                                 ),
-                              const SizedBox(height: 6),
-                              Row(
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: activa
-                                          ? Colors.green.withOpacity(.15)
-                                          : Colors.grey.withOpacity(.2),
-                                      borderRadius: BorderRadius.circular(999),
-                                    ),
-                                    child: Text(
-                                      activa ? 'Activa' : 'Finalizada',
-                                      style: Theme.of(context).textTheme.labelSmall,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text('Hasta $finStr',
-                                      style: Theme.of(context).textTheme.bodySmall),
-                                ],
                               ),
                             ],
                           ),
                         ),
-                      ],
-                    ),
-                  ),
+                      ),
+                    );
+                  },
                 ),
-              );
-            },
+              ),
+            ],
           );
         },
       ),
+
       floatingActionButton: kIsAdmin
           ? FloatingActionButton.extended(
               onPressed: () => _abrirFormOferta(),
@@ -523,3 +606,65 @@ class _OfertasPageState extends State<OfertasPage> {
     );
   }
 }
+
+// ====== NUEVO: Widget de barra de filtros ======
+class _FiltrosBar extends StatelessWidget {
+  final String? filtroComercioNombre;
+  final bool soloActivas;
+  final VoidCallback onElegirComercio;
+  final ValueChanged<bool> onToggleActivas;
+
+  const _FiltrosBar({
+    required this.filtroComercioNombre,
+    required this.soloActivas,
+    required this.onElegirComercio,
+    required this.onToggleActivas,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+      child: Row(
+        children: [
+          Expanded(
+            child: OutlinedButton.icon(
+              icon: const Icon(Icons.store_mall_directory),
+              label: Text(
+                (filtroComercioNombre?.isNotEmpty ?? false)
+                    ? filtroComercioNombre!
+                    : 'Todos los comercios',
+                overflow: TextOverflow.ellipsis,
+              ),
+              onPressed: onElegirComercio,
+            ),
+          ),
+          const SizedBox(width: 8),
+          InkWell(
+            onTap: () => onToggleActivas(!soloActivas),
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerHighest.withOpacity(.6),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  const Text('Solo activas'),
+                  const SizedBox(width: 6),
+                  Switch(
+                    value: soloActivas,
+                    onChanged: onToggleActivas,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
