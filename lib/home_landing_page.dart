@@ -4,7 +4,7 @@ import 'ofertas_page.dart';
 import 'comercios_mock_page.dart';
 import 'comercios_page.dart' as cp;
 import 'admin_state.dart';
-// 👇 acceso al panel
+// acceso al panel
 import 'admin_panel_page.dart';
 
 // PIN de administrador (podés cambiarlo cuando quieras)
@@ -35,9 +35,61 @@ class HomeLandingPage extends StatelessWidget {
               ),
             ),
           ),
+
+          // -------- BANNER ADMIN ARRIBA (solo si adminMode = true) --------
+          SliverToBoxAdapter(
+            child: ValueListenableBuilder<bool>(
+              valueListenable: adminMode,
+              builder: (context, isAdmin, _) {
+                if (!isAdmin) return const SizedBox.shrink();
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: cs.primary,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.verified_user, color: Colors.white),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Text(
+                            'Admin activo',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        TextButton.icon(
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            backgroundColor: Colors.white.withOpacity(.18),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          ),
+                          onPressed: () {
+                            adminMode.value = false;
+                            cp.kIsAdmin = false;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Modo admin desactivado')),
+                            );
+                          },
+                          icon: const Icon(Icons.logout, size: 18),
+                          label: const Text('Salir'),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+
           SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -95,7 +147,7 @@ class HomeLandingPage extends StatelessWidget {
 
                   const SizedBox(height: 12),
 
-                  // 👇 ahora lo envolvemos con ValueListenableBuilder
+                  // Panel visible SOLO si admin activo
                   ValueListenableBuilder<bool>(
                     valueListenable: adminMode,
                     builder: (context, isAdmin, _) {
@@ -108,8 +160,7 @@ class HomeLandingPage extends StatelessWidget {
                             subtitle: 'Comercios · Ofertas · Stock · Finanzas',
                             onTap: () => Navigator.push(
                               context,
-                              MaterialPageRoute(
-                                  builder: (_) => const AdminPanelPage()),
+                              MaterialPageRoute(builder: (_) => const AdminPanelPage()),
                             ),
                           ),
                           const SizedBox(height: 24),
@@ -176,10 +227,6 @@ class HomeLandingPage extends StatelessWidget {
         cp.kIsAdmin = true;
         if (ctx.mounted) Navigator.pop(ctx);
         if (context.mounted) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const ComerciosPage()),
-          );
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Modo admin activado')),
           );

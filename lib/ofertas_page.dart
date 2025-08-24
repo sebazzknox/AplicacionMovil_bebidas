@@ -1,12 +1,15 @@
+// lib/ofertas_page.dart
+import 'dart:async';
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'comercio_detalle_page.dart';
-import 'comercios_page.dart' show kIsAdmin; // reutilizamos el flag
+import 'comercios_page.dart' show kIsAdmin; // flag admin
 
 class OfertasPage extends StatefulWidget {
   const OfertasPage({super.key});
@@ -19,7 +22,7 @@ class _OfertasPageState extends State<OfertasPage> {
   final _picker = ImagePicker();
   XFile? _fotoTmp;
 
-  // ====== NUEVO (Punto 4): Filtros ======
+  // Filtros
   String? _filtroComercioId;
   String? _filtroComercioNombre;
   bool _soloActivas = false;
@@ -32,7 +35,6 @@ class _OfertasPageState extends State<OfertasPage> {
       appBar: AppBar(
         title: const Text('Ofertas'),
         actions: [
-          // Limpia filtros si hay alguno activo
           if ((_filtroComercioId?.isNotEmpty ?? false) || _soloActivas)
             IconButton(
               tooltip: 'Limpiar filtros',
@@ -46,87 +48,78 @@ class _OfertasPageState extends State<OfertasPage> {
         ],
       ),
 
-      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        // ✅ Un solo orderBy para NO requerir índice compuesto
-        stream: col.orderBy('fin', descending: true).snapshots(),
-        builder: (context, snap) {
-          if (snap.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snap.hasError) {
-            return Center(child: Text('Error: ${snap.error}'));
-          }
-          final docsAll = (snap.data?.docs ?? []).toList();
+      body: Column(
+        children: [
+          // Banner dinámico desde Firestore (si existe/activo)
+          const _DynamicBanner(),
 
-          // ====== NUEVO: filtros en memoria ======
-          List<DocumentSnapshot<Map<String, dynamic>>> docs = docsAll.where((d) {
-            final data = d.data() ?? {};
-            final activa = (data['activa'] ?? true) == true;
-            final comercioId = data['comercioId'] as String?;
-            if (_soloActivas && !activa) return false;
-            if ((_filtroComercioId?.isNotEmpty ?? false) &&
-                comercioId != _filtroComercioId) return false;
-            return true;
-          }).toList();
+          // Banner local desde assets (siempre visible)
+          const _LocalBanner(imagePath: 'assets/banners/imagen2x1.jpg'),
 
-          if (docs.isEmpty) {
-            return Column(
-              children: [
-                // ====== NUEVO: barra de filtros arriba ======
-                _FiltrosBar(
-                  filtroComercioNombre: _filtroComercioNombre,
-                  soloActivas: _soloActivas,
-                  onElegirComercio: () async {
-                    final picked = await _seleccionarComercio(context);
-                    if (picked != null) {
-                      setState(() {
-                        _filtroComercioId = picked['id'];
-                        _filtroComercioNombre = picked['nombre'];
-                      });
-                    }
-                  },
-                  onToggleActivas: (v) => setState(() => _soloActivas = v),
-                ),
-                const Expanded(
-                  child: Center(child: Text('No hay ofertas para los filtros elegidos.')),
-                ),
-              ],
-            );
-          }
+          // Carrusel autoplay (sin índice compuesto)
+          const _OfertasCarrusel(),
 
-          // ✅ Reordenamos en memoria: activas primero, luego por fin desc
-          int activeVal(DocumentSnapshot<Map<String, dynamic>> d) =>
-              (d.data()?['activa'] == true) ? 1 : 0;
-          DateTime finOf(DocumentSnapshot<Map<String, dynamic>> d) =>
-              (d.data()?['fin'] as Timestamp?)?.toDate() ??
-              DateTime.fromMillisecondsSinceEpoch(0);
+          // Barra de filtros
+          _FiltrosBar(
+            filtroComercioNombre: _filtroComercioNombre,
+            soloActivas: _soloActivas,
+            onElegirComercio: () async {
+              final picked = await _seleccionarComercio(context);
+              if (picked != null) {
+                setState(() {
+                  _filtroComercioId = picked['id'];
+                  _filtroComercioNombre = picked['nombre'];
+                });
+              }
+            },
+            onToggleActivas: (v) => setState(() => _soloActivas = v),
+          ),
 
-          docs.sort((a, b) {
-            final byActive = activeVal(b) - activeVal(a); // true primero
-            if (byActive != 0) return byActive;
-            return finOf(b).compareTo(finOf(a)); // 'fin' desc
-          });
+          // Lista
+          Expanded(
+            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              // Un solo orderBy para evitar índice compuesto
+              stream: col.orderBy('fin', descending: true).snapshots(),
+              builder: (context, snap) {
+                if (snap.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (snap.hasError) {
+                  return Center(child: Text('Error: ${snap.error}'));
+                }
+                final docsAll = (snap.data?.docs ?? []).toList();
 
-          return Column(
-            children: [
-              // ====== NUEVO: barra de filtros arriba ======
-              _FiltrosBar(
-                filtroComercioNombre: _filtroComercioNombre,
-                soloActivas: _soloActivas,
-                onElegirComercio: () async {
-                  final picked = await _seleccionarComercio(context);
-                  if (picked != null) {
-                    setState(() {
-                      _filtroComercioId = picked['id'];
-                      _filtroComercioNombre = picked['nombre'];
-                    });
-                  }
-                },
-                onToggleActivas: (v) => setState(() => _soloActivas = v),
-              ),
+                // Filtros en memoria
+                List<DocumentSnapshot<Map<String, dynamic>>> docs = docsAll.where((d) {
+                  final data = d.data() ?? {};
+                  final activa = (data['activa'] ?? true) == true;
+                  final comercioId = data['comercioId'] as String?;
+                  if (_soloActivas && !activa) return false;
+                  if ((_filtroComercioId?.isNotEmpty ?? false) &&
+                      comercioId != _filtroComercioId) return false;
+                  return true;
+                }).toList();
 
-              Expanded(
-                child: ListView.separated(
+                if (docs.isEmpty) {
+                  return const Center(
+                    child: Text('No hay ofertas para los filtros elegidos.'),
+                  );
+                }
+
+                // Reordenar: activas primero, luego por fin desc
+                int activeVal(DocumentSnapshot<Map<String, dynamic>> d) =>
+                    (d.data()?['activa'] == true) ? 1 : 0;
+                DateTime finOf(DocumentSnapshot<Map<String, dynamic>> d) =>
+                    (d.data()?['fin'] as Timestamp?)?.toDate() ??
+                    DateTime.fromMillisecondsSinceEpoch(0);
+
+                docs.sort((a, b) {
+                  final byActive = activeVal(b) - activeVal(a);
+                  if (byActive != 0) return byActive;
+                  return finOf(b).compareTo(finOf(a));
+                });
+
+                return ListView.separated(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
                   itemCount: docs.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 10),
@@ -252,11 +245,11 @@ class _OfertasPageState extends State<OfertasPage> {
                       ),
                     );
                   },
-                ),
-              ),
-            ],
-          );
-        },
+                );
+              },
+            ),
+          ),
+        ],
       ),
 
       floatingActionButton: kIsAdmin
@@ -277,11 +270,10 @@ class _OfertasPageState extends State<OfertasPage> {
     final tituloCtrl = TextEditingController(text: data?['titulo'] ?? '');
     final descCtrl   = TextEditingController(text: data?['descripcion'] ?? '');
 
-    // 👉 Variables para el selector de comercio
+    // Selector de comercio
     String? selectedComercioId   = data?['comercioId'] as String?;
     String? selectedComercioName;
 
-    // Si viene un ID, intentamos precargar el nombre para mostrarlo
     if (selectedComercioId != null && selectedComercioId.isNotEmpty) {
       try {
         final snap = await FirebaseFirestore.instance
@@ -293,6 +285,7 @@ class _OfertasPageState extends State<OfertasPage> {
     DateTime? inicio = (data?['inicio'] as Timestamp?)?.toDate();
     DateTime? fin    = (data?['fin'] as Timestamp?)?.toDate();
     bool activa      = (data?['activa'] ?? true) as bool;
+    bool destacada   = (data?['destacada'] ?? false) as bool;
     String? fotoUrlPreview = data?['fotoUrl'] as String?;
     _fotoTmp = null;
 
@@ -360,7 +353,7 @@ class _OfertasPageState extends State<OfertasPage> {
                 ),
                 const SizedBox(height: 8),
 
-                // 👇 Selector de comercio (reemplaza al TextField de ID)
+                // Selector de comercio
                 InkWell(
                   borderRadius: BorderRadius.circular(12),
                   onTap: () async {
@@ -438,6 +431,16 @@ class _OfertasPageState extends State<OfertasPage> {
                     ),
                   ],
                 ),
+                Row(
+                  children: [
+                    const Text('Destacada (carrusel)'),
+                    const Spacer(),
+                    Switch(
+                      value: destacada,
+                      onChanged: (v) => setLocal(() => destacada = v),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -463,11 +466,11 @@ class _OfertasPageState extends State<OfertasPage> {
     final payload = <String, dynamic>{
       'titulo': titulo,
       'descripcion': descCtrl.text.trim(),
-      // 👉 guardamos el ID elegido (o null si no hay)
       'comercioId': (selectedComercioId?.isNotEmpty ?? false) ? selectedComercioId : null,
       'inicio': inicio != null ? Timestamp.fromDate(inicio!) : FieldValue.delete(),
       'fin': fin != null ? Timestamp.fromDate(fin!) : FieldValue.delete(),
       'activa': activa,
+      'destacada': destacada,
       'updatedAt': FieldValue.serverTimestamp(),
     };
 
@@ -506,12 +509,14 @@ class _OfertasPageState extends State<OfertasPage> {
       setState(() => _fotoTmp = null);
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(isEdit ? 'Oferta actualizada' : 'Oferta creada')),
-    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(isEdit ? 'Oferta actualizada' : 'Oferta creada')),
+      );
+    }
   }
 
-  // ---------- Helpers Storage ----------
+  // ---------- Storage ----------
   Future<({String url, String path})?> _uploadFoto(String ofertaId) async {
     if (_fotoTmp == null) return null;
     final path = 'ofertas/$ofertaId/foto.jpg';
@@ -607,7 +612,265 @@ class _OfertasPageState extends State<OfertasPage> {
   }
 }
 
-// ====== NUEVO: Widget de barra de filtros ======
+// ====== Banner dinámico desde Firestore ======
+class _DynamicBanner extends StatelessWidget {
+  const _DynamicBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final col = FirebaseFirestore.instance.collection('banners');
+
+    // preferimos doc 'home', si no existe usamos primero activo
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: col.doc('home').snapshots(),
+      builder: (context, homeSnap) {
+        if (homeSnap.hasData && (homeSnap.data?.exists ?? false)) {
+          final data = homeSnap.data!.data()!;
+          final activo = (data['activo'] ?? true) == true;
+          if (!activo) return const SizedBox(height: 0);
+          return _BannerCard(
+            titulo: (data['titulo'] ?? '').toString(),
+            texto: (data['texto'] ?? '').toString(),
+            ctaLabel: (data['ctaLabel'] ?? '').toString(),
+            ctaUrl: (data['ctaUrl'] ?? '').toString(),
+          );
+        }
+
+        // fallback: primer banner activo
+        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: col.where('activo', isEqualTo: true).limit(1).snapshots(),
+          builder: (context, snap) {
+            if (!snap.hasData || snap.data!.docs.isEmpty) {
+              return const SizedBox.shrink();
+            }
+            final data = snap.data!.docs.first.data();
+            return _BannerCard(
+              titulo: (data['titulo'] ?? '').toString(),
+              texto: (data['texto'] ?? '').toString(),
+              ctaLabel: (data['ctaLabel'] ?? '').toString(),
+              ctaUrl: (data['ctaUrl'] ?? '').toString(),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _BannerCard extends StatelessWidget {
+  final String titulo;
+  final String texto;
+  final String ctaLabel;
+  final String ctaUrl;
+  const _BannerCard({
+    required this.titulo,
+    required this.texto,
+    required this.ctaLabel,
+    required this.ctaUrl,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    if (titulo.isEmpty && texto.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          gradient: LinearGradient(
+            colors: [cs.primaryContainer, cs.surface],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (titulo.isNotEmpty)
+                    Text(titulo, style: Theme.of(context).textTheme.titleMedium),
+                  if (texto.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      texto,
+                      style: Theme.of(context).textTheme.bodySmall,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            if (ctaUrl.isNotEmpty && ctaLabel.isNotEmpty) ...[
+              const SizedBox(width: 12),
+              FilledButton.tonal(
+                onPressed: () async {
+                  final uri = Uri.tryParse(ctaUrl);
+                  if (uri != null) {
+                    await launchUrl(uri, mode: LaunchMode.externalApplication);
+                  }
+                },
+                child: Text(ctaLabel),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ====== Banner local (assets) ======
+class _LocalBanner extends StatelessWidget {
+  final String imagePath;
+  const _LocalBanner({required this.imagePath});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: AspectRatio(
+          aspectRatio: 16 / 9,
+          child: Image.asset(imagePath, fit: BoxFit.cover),
+        ),
+      ),
+    );
+  }
+}
+
+// ====== Carrusel autoplay de ofertas destacadas (sin índice compuesto) ======
+class _OfertasCarrusel extends StatefulWidget {
+  const _OfertasCarrusel();
+
+  @override
+  State<_OfertasCarrusel> createState() => _OfertasCarruselState();
+}
+
+class _OfertasCarruselState extends State<_OfertasCarrusel> {
+  final _pageCtrl = PageController(viewportFraction: .9);
+  Timer? _timer;
+  int _idx = 0;
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _pageCtrl.dispose();
+    super.dispose();
+  }
+
+  void _startAuto(int length) {
+    _timer?.cancel();
+    if (length <= 1) return;
+    _timer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (!mounted) return;
+      _idx = (_idx + 1) % length;
+      _pageCtrl.animateToPage(
+        _idx,
+        duration: const Duration(milliseconds: 450),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Solo where activa + orderBy fin → NO requiere índice compuesto.
+    final q = FirebaseFirestore.instance
+        .collection('ofertas')
+        .where('activa', isEqualTo: true)
+        .orderBy('fin', descending: true)
+        .limit(20);
+
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: q.snapshots(),
+      builder: (context, snap) {
+        if (!snap.hasData || snap.data!.docs.isEmpty) {
+          _timer?.cancel();
+          return const SizedBox.shrink();
+        }
+        // Filtramos destacadas en memoria (evita índice compuesto)
+        final docs = snap.data!.docs
+            .where((d) => (d.data()['destacada'] ?? false) == true)
+            .toList();
+
+        if (docs.isEmpty) {
+          _timer?.cancel();
+          return const SizedBox.shrink();
+        }
+
+        _startAuto(docs.length);
+
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(0, 8, 0, 4),
+          child: SizedBox(
+            height: 148,
+            child: PageView.builder(
+              controller: _pageCtrl,
+              itemCount: docs.length,
+              itemBuilder: (_, i) {
+                final d = docs[i].data();
+                final foto = d['fotoUrl'] as String?;
+                final titulo = (d['titulo'] ?? '').toString();
+                final comercioId = d['comercioId'] as String?;
+                return Padding(
+                  padding: const EdgeInsets.only(left: 12, right: 12),
+                  child: GestureDetector(
+                    onTap: () {
+                      if (comercioId == null) return;
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => ComercioDetallePage(comercioId: comercioId),
+                        ),
+                      );
+                    },
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          if (foto != null && foto.isNotEmpty)
+                            Image.network(foto, fit: BoxFit.cover)
+                          else
+                            Container(color: Colors.black12),
+                          Align(
+                            alignment: Alignment.bottomLeft,
+                            child: Container(
+                              margin: const EdgeInsets.all(10),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(.45),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                titulo,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: Colors.white),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ====== Barra de filtros ======
 class _FiltrosBar extends StatelessWidget {
   final String? filtroComercioNombre;
   final bool soloActivas;
@@ -667,4 +930,3 @@ class _FiltrosBar extends StatelessWidget {
     );
   }
 }
-

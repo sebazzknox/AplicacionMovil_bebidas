@@ -1,7 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
-
+import 'package:share_plus/share_plus.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 import 'bebidas_page.dart';
@@ -66,6 +66,28 @@ class ComercioDetallePage extends StatelessWidget {
           appBar: AppBar(
             title: Text(nombre.isEmpty ? 'Comercio' : nombre),
             actions: [
+              // 👇 NUEVO: Compartir comercio
+              IconButton(
+                tooltip: 'Compartir',
+                icon: const Icon(Icons.share_outlined),
+                onPressed: () {
+                  final partes = <String>[];
+                  partes.add(nombre.isEmpty ? 'Mirá este comercio 👇' : 'Mirá "$nombre" 👇');
+                  if (direccion != null && direccion.isNotEmpty) {
+                    partes.add('📍 $direccion');
+                  }
+                  final loc = [
+                    if (ciudad != null && ciudad.isNotEmpty) ciudad,
+                    if (provincia != null && provincia.isNotEmpty) provincia,
+                  ].join(', ');
+                  if (loc.isNotEmpty) partes.add('🏙️ $loc');
+                  if (telefono != null && telefono.isNotEmpty) partes.add('📞 $telefono');
+                  if (instagram != null && instagram.isNotEmpty) partes.add('📸 $instagram');
+                  if (facebook != null && facebook.isNotEmpty) partes.add('📘 $facebook');
+                  partes.add('\nDescargá la app y encontrá más bebidas cerca 🍻');
+                  Share.share(partes.join('\n'));
+                },
+              ),
               if (kIsAdmin)
                 IconButton(
                   tooltip: 'Editar comercio',
