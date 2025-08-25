@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import 'package:fl_chart/fl_chart.dart';
 
 import 'comercios_page.dart' show kIsAdmin;
+import 'ui/app_states.dart'; // ⬅️ estados de carga / error / vacío
 
 class FinanzasPage extends StatefulWidget {
   const FinanzasPage({super.key});
@@ -22,7 +23,7 @@ class _FinanzasPageState extends State<FinanzasPage> {
   // Filtro de mes (null = todos). Guardamos primer día del mes.
   DateTime? _mesElegido;
 
-  // ====== NUEVO: filtro por comercio ======
+  // ====== filtro por comercio ======
   List<_ComercioOpt> _comercios = [];
   String? _comercioFiltroId; // null => "Todos"
   bool _cargandoComercios = true;
@@ -121,7 +122,7 @@ class _FinanzasPageState extends State<FinanzasPage> {
                   ],
                 ),
                 const SizedBox(height: 8),
-                // ====== NUEVO: Filtro por comercio ======
+                // Filtro por comercio
                 Row(
                   children: [
                     Expanded(
@@ -177,19 +178,19 @@ class _FinanzasPageState extends State<FinanzasPage> {
       case 'resumen':
         return _ResumenFinanzas(
           mesElegido: _mesElegido,
-          comercioFiltroId: _comercioFiltroId, // NUEVO
+          comercioFiltroId: _comercioFiltroId,
         );
       case 'ingresos':
         return _MovimientosList(
           tipo: 'ingreso',
           mesElegido: _mesElegido,
-          comercioFiltroId: _comercioFiltroId, // NUEVO
+          comercioFiltroId: _comercioFiltroId,
         );
       case 'gastos':
         return _MovimientosList(
           tipo: 'gasto',
           mesElegido: _mesElegido,
-          comercioFiltroId: _comercioFiltroId, // NUEVO
+          comercioFiltroId: _comercioFiltroId,
         );
       default:
         return const SizedBox.shrink();
@@ -244,7 +245,7 @@ class _FinanzasPageState extends State<FinanzasPage> {
                     )
                   else
                     DropdownButtonFormField<String>(
-                      value: comercioIdSel,
+                      initialValue: comercioIdSel,
                       decoration: const InputDecoration(
                         labelText: 'Comercio',
                         prefixIcon: Icon(Icons.storefront_outlined),
@@ -392,7 +393,7 @@ class _FinanzasPageState extends State<FinanzasPage> {
 
   // -------------------- EXPORTAR CSV --------------------
   Future<void> _exportarCsv() async {
-    final desde = _mesElegido != null ? _mesElegido : null;
+    final desde = _mesElegido;
     final hasta = _mesElegido != null
         ? DateTime(_mesElegido!.year, _mesElegido!.month + 1, 1)
         : null;
@@ -448,7 +449,7 @@ class _FinanzasPageState extends State<FinanzasPage> {
 class _MovimientosList extends StatelessWidget {
   final String tipo; // ingreso | gasto
   final DateTime? mesElegido;
-  final String? comercioFiltroId; // NUEVO
+  final String? comercioFiltroId;
   const _MovimientosList({
     required this.tipo,
     required this.mesElegido,
@@ -483,11 +484,19 @@ class _MovimientosList extends StatelessWidget {
       stream: q.snapshots(),
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
+          return const AppLoading(text: 'Cargando movimientos...');
         }
+        if (snap.hasError) {
+          return const AppError('No se pudieron cargar los datos.');
+        }
+
         final docs = snap.data?.docs ?? [];
         if (docs.isEmpty) {
-          return const Center(child: Text('Sin movimientos.'));
+          return const AppEmpty(
+            title: 'Sin movimientos',
+            subtitle: 'Aún no hay registros para el filtro elegido.',
+            icon: Icons.receipt_long_outlined,
+          );
         }
 
         final total = docs.fold<num>(0, (a, e) => a + ((e.data()['monto'] ?? 0) as num));
@@ -540,8 +549,7 @@ class _MovimientosList extends StatelessWidget {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
-                            (tipo == 'ingreso' ? '+ ' : '- ') +
-                                '\$${monto.toStringAsFixed(2)}',
+                            '${tipo == 'ingreso' ? '+ ' : '- '}\$${monto.toStringAsFixed(2)}',
                             style: Theme.of(context).textTheme.titleSmall,
                           ),
                           if (kIsAdmin)
@@ -664,9 +672,8 @@ class _MovimientosList extends StatelessWidget {
 // -------------------- RESUMEN (GRÁFICO + KPIs) --------------------
 class _ResumenFinanzas extends StatelessWidget {
   final DateTime? mesElegido;
-  final String? comercioFiltroId; // NUEVO
+  final String? comercioFiltroId;
   const _ResumenFinanzas({
-    super.key,
     required this.mesElegido,
     required this.comercioFiltroId,
   });
@@ -700,13 +707,21 @@ class _ResumenFinanzas extends StatelessWidget {
       stream: q.snapshots(),
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
+          return const AppLoading(text: 'Cargando resumen...');
         }
+        if (snap.hasError) {
+          return const AppError('No se pudieron cargar los datos.');
+        }
+
         final docs = snap.data?.docs ?? [];
         final series = _acumularPorMes(docs, desde, meses: mesElegido == null ? 6 : 1);
 
         if (series.isEmpty) {
-          return const Center(child: Text('Sin datos.'));
+          return const AppEmpty(
+            title: 'Sin datos',
+            subtitle: 'Aún no hay movimientos para el rango elegido.',
+            icon: Icons.bar_chart_rounded,
+          );
         }
 
         return ListView(
@@ -841,7 +856,7 @@ class _MesSerie {
 
 class _KpiRow extends StatelessWidget {
   final List<_MesSerie> series;
-  const _KpiRow({super.key, required this.series});
+  const _KpiRow({required this.series});
 
   @override
   Widget build(BuildContext context) {

@@ -10,6 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'comercio_detalle_page.dart';
 import 'comercios_page.dart' show kIsAdmin; // flag admin
+import 'ui/app_states.dart'; // ⬅️ estados de carga / error / vacío
 
 class OfertasPage extends StatefulWidget {
   const OfertasPage({super.key});
@@ -82,11 +83,12 @@ class _OfertasPageState extends State<OfertasPage> {
               stream: col.orderBy('fin', descending: true).snapshots(),
               builder: (context, snap) {
                 if (snap.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
+                  return const AppLoading(text: 'Cargando ofertas...');
                 }
                 if (snap.hasError) {
-                  return Center(child: Text('Error: ${snap.error}'));
+                  return const AppError('Ocurrió un error al cargar las ofertas.');
                 }
+
                 final docsAll = (snap.data?.docs ?? []).toList();
 
                 // Filtros en memoria
@@ -101,8 +103,10 @@ class _OfertasPageState extends State<OfertasPage> {
                 }).toList();
 
                 if (docs.isEmpty) {
-                  return const Center(
-                    child: Text('No hay ofertas para los filtros elegidos.'),
+                  return const AppEmpty(
+                    title: 'Sin resultados',
+                    subtitle: 'Probá quitando filtros o volvé más tarde.',
+                    icon: Icons.local_offer_outlined,
                   );
                 }
 
@@ -571,11 +575,15 @@ class _OfertasPageState extends State<OfertasPage> {
                     stream: col.orderBy('nombre').snapshots(),
                     builder: (context, snap) {
                       if (!snap.hasData) {
-                        return const Center(child: CircularProgressIndicator());
+                        return const AppLoading(text: 'Cargando comercios...');
                       }
                       final docs = snap.data!.docs;
                       if (docs.isEmpty) {
-                        return const Center(child: Text('No hay comercios.'));
+                        return const AppEmpty(
+                          title: 'Sin comercios',
+                          subtitle: 'Creá un comercio para continuar.',
+                          icon: Icons.store_mall_directory_outlined,
+                        );
                       }
                       return ListView.builder(
                         itemCount: docs.length,
@@ -791,12 +799,15 @@ class _OfertasCarruselState extends State<_OfertasCarrusel> {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: q.snapshots(),
       builder: (context, snap) {
-        if (!snap.hasData || snap.data!.docs.isEmpty) {
-          _timer?.cancel();
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const SizedBox.shrink(); // carrusel es opcional
+        }
+        if (snap.hasError) {
           return const SizedBox.shrink();
         }
+
         // Filtramos destacadas en memoria (evita índice compuesto)
-        final docs = snap.data!.docs
+        final docs = (snap.data?.docs ?? [])
             .where((d) => (d.data()['destacada'] ?? false) == true)
             .toList();
 
