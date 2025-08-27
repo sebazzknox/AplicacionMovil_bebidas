@@ -3,7 +3,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import 'admin_state.dart';
-import 'comercios_page.dart' show kIsAdmin;
 import 'comercios_page.dart';
 import 'ofertas_page.dart';
 import 'stock_page.dart';

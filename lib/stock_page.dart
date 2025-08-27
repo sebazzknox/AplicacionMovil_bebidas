@@ -156,7 +156,7 @@ class _StockPageState extends State<StockPage> with TickerProviderStateMixin {
     };
 
     if (isEdit) {
-      await doc!.reference.update(payload);
+      await doc.reference.update(payload);
     } else {
       await stockCol.add({
         ...payload,
@@ -563,7 +563,7 @@ class _SolicitudesTab extends StatelessWidget {
       final itemRef = stockCol.doc(itemId);
       await FirebaseFirestore.instance.runTransaction((tx) async {
         final snap = await tx.get(itemRef);
-        final cur = snap.data() as Map<String, dynamic>?;
+        final cur = snap.data();
         if (cur == null) return;
         final cantidad = (cur['cantidad'] ?? 0) as num;
         final nuevoPrecio = data['nuevoPrecio'] as num?;

@@ -10,7 +10,6 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'comercio_detalle_page.dart';
 import 'comercios_page.dart' show kIsAdmin; // flag admin
-import 'ui/app_states.dart'; // ⬅️ estados de carga / error / vacío
 
 class OfertasPage extends StatefulWidget {
   const OfertasPage({super.key});
@@ -46,6 +45,7 @@ class _OfertasPageState extends State<OfertasPage> {
               }),
               icon: const Icon(Icons.filter_alt_off),
             ),
+          const SizedBox(width: 4),
         ],
       ),
 
@@ -54,9 +54,8 @@ class _OfertasPageState extends State<OfertasPage> {
           // Banner dinámico desde Firestore (si existe/activo)
           const _DynamicBanner(),
 
-          // Banner local desde assets (siempre visible)
-          const _LocalBanner(imagePath: 'assets/banners/imagen2x1.jpg'),
-
+          
+          
           // Carrusel autoplay (sin índice compuesto)
           const _OfertasCarrusel(),
 
@@ -83,12 +82,11 @@ class _OfertasPageState extends State<OfertasPage> {
               stream: col.orderBy('fin', descending: true).snapshots(),
               builder: (context, snap) {
                 if (snap.connectionState == ConnectionState.waiting) {
-                  return const AppLoading(text: 'Cargando ofertas...');
+                  return const Center(child: CircularProgressIndicator());
                 }
                 if (snap.hasError) {
-                  return const AppError('Ocurrió un error al cargar las ofertas.');
+                  return Center(child: Text('Error: ${snap.error}'));
                 }
-
                 final docsAll = (snap.data?.docs ?? []).toList();
 
                 // Filtros en memoria
@@ -102,13 +100,14 @@ class _OfertasPageState extends State<OfertasPage> {
                   return true;
                 }).toList();
 
-                if (docs.isEmpty) {
-                  return const AppEmpty(
-                    title: 'Sin resultados',
-                    subtitle: 'Probá quitando filtros o volvé más tarde.',
-                    icon: Icons.local_offer_outlined,
-                  );
-                }
+               if (docs.isEmpty) {
+               return _EmptyState(
+                title: 'Sin ofertas',
+                subtitle: 'No encontramos ofertas para los filtros elegidos.',
+                ctaLabel: kIsAdmin ? 'Crear oferta' : null,
+                 onCta: kIsAdmin ? () => _abrirFormOferta() : null,
+                 );
+                 }
 
                 // Reordenar: activas primero, luego por fin desc
                 int activeVal(DocumentSnapshot<Map<String, dynamic>> d) =>
@@ -141,7 +140,7 @@ class _OfertasPageState extends State<OfertasPage> {
                     return Material(
                       color: Theme.of(context).colorScheme.surface,
                       borderRadius: BorderRadius.circular(16),
-                      elevation: 0.5,
+                      elevation: 1.0,
                       child: InkWell(
                         borderRadius: BorderRadius.circular(16),
                         onTap: () {
@@ -575,15 +574,11 @@ class _OfertasPageState extends State<OfertasPage> {
                     stream: col.orderBy('nombre').snapshots(),
                     builder: (context, snap) {
                       if (!snap.hasData) {
-                        return const AppLoading(text: 'Cargando comercios...');
+                        return const Center(child: CircularProgressIndicator());
                       }
                       final docs = snap.data!.docs;
                       if (docs.isEmpty) {
-                        return const AppEmpty(
-                          title: 'Sin comercios',
-                          subtitle: 'Creá un comercio para continuar.',
-                          icon: Icons.store_mall_directory_outlined,
-                        );
+                        return const Center(child: Text('No hay comercios.'));
                       }
                       return ListView.builder(
                         itemCount: docs.length,
@@ -670,6 +665,7 @@ class _BannerCard extends StatelessWidget {
   final String texto;
   final String ctaLabel;
   final String ctaUrl;
+
   const _BannerCard({
     required this.titulo,
     required this.texto,
@@ -680,53 +676,72 @@ class _BannerCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    if (titulo.isEmpty && texto.isEmpty) return const SizedBox.shrink();
+
+    if (titulo.isEmpty && texto.isEmpty) {
+      return const SizedBox.shrink();
+    }
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
-      child: Container(
-        decoration: BoxDecoration(
+      child: AspectRatio(
+        aspectRatio: 16 / 9, // misma proporción que tus banners locales
+        child: ClipRRect(
           borderRadius: BorderRadius.circular(16),
-          gradient: LinearGradient(
-            colors: [cs.primaryContainer, cs.surface],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-        ),
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (titulo.isNotEmpty)
-                    Text(titulo, style: Theme.of(context).textTheme.titleMedium),
-                  if (texto.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      texto,
-                      style: Theme.of(context).textTheme.bodySmall,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ],
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [cs.primaryContainer, cs.surface],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
               ),
             ),
-            if (ctaUrl.isNotEmpty && ctaLabel.isNotEmpty) ...[
-              const SizedBox(width: 12),
-              FilledButton.tonal(
-                onPressed: () async {
-                  final uri = Uri.tryParse(ctaUrl);
-                  if (uri != null) {
-                    await launchUrl(uri, mode: LaunchMode.externalApplication);
-                  }
-                },
-                child: Text(ctaLabel),
-              ),
-            ],
-          ],
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+            child: Row(
+              children: [
+                // Texto
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (titulo.isNotEmpty)
+                        Text(
+                          titulo,
+                          style: Theme.of(context).textTheme.titleMedium,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      if (texto.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          texto,
+                          style: Theme.of(context).textTheme.bodySmall,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+
+                // CTA
+                if (ctaUrl.isNotEmpty && ctaLabel.isNotEmpty) ...[
+                  const SizedBox(width: 12),
+                  FittedBox(
+                    child: FilledButton.tonal(
+                      onPressed: () async {
+                        final uri = Uri.tryParse(ctaUrl);
+                        if (uri != null) {
+                          await launchUrl(uri, mode: LaunchMode.externalApplication);
+                        }
+                      },
+                      child: Text(ctaLabel),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -760,11 +775,22 @@ class _OfertasCarrusel extends StatefulWidget {
   @override
   State<_OfertasCarrusel> createState() => _OfertasCarruselState();
 }
-
 class _OfertasCarruselState extends State<_OfertasCarrusel> {
   final _pageCtrl = PageController(viewportFraction: .9);
   Timer? _timer;
   int _idx = 0;
+
+  // 👉 Lista de imágenes locales (asegurate de tenerlas en pubspec.yaml)
+  final List<String> _localImages = const [
+    'assets/banners/imagen2x1.jpg',
+    'assets/banners/prueba.jpg',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _startAuto();
+  }
 
   @override
   void dispose() {
@@ -773,12 +799,12 @@ class _OfertasCarruselState extends State<_OfertasCarrusel> {
     super.dispose();
   }
 
-  void _startAuto(int length) {
+  void _startAuto() {
     _timer?.cancel();
-    if (length <= 1) return;
-    _timer = Timer.periodic(const Duration(seconds: 4), (_) {
+    if (_localImages.length <= 1) return;
+    _timer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (!mounted) return;
-      _idx = (_idx + 1) % length;
+      _idx = (_idx + 1) % _localImages.length;
       _pageCtrl.animateToPage(
         _idx,
         duration: const Duration(milliseconds: 450),
@@ -789,94 +815,27 @@ class _OfertasCarruselState extends State<_OfertasCarrusel> {
 
   @override
   Widget build(BuildContext context) {
-    // Solo where activa + orderBy fin → NO requiere índice compuesto.
-    final q = FirebaseFirestore.instance
-        .collection('ofertas')
-        .where('activa', isEqualTo: true)
-        .orderBy('fin', descending: true)
-        .limit(20);
+    if (_localImages.isEmpty) return const SizedBox.shrink();
 
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: q.snapshots(),
-      builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) {
-          return const SizedBox.shrink(); // carrusel es opcional
-        }
-        if (snap.hasError) {
-          return const SizedBox.shrink();
-        }
-
-        // Filtramos destacadas en memoria (evita índice compuesto)
-        final docs = (snap.data?.docs ?? [])
-            .where((d) => (d.data()['destacada'] ?? false) == true)
-            .toList();
-
-        if (docs.isEmpty) {
-          _timer?.cancel();
-          return const SizedBox.shrink();
-        }
-
-        _startAuto(docs.length);
-
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(0, 8, 0, 4),
-          child: SizedBox(
-            height: 148,
-            child: PageView.builder(
-              controller: _pageCtrl,
-              itemCount: docs.length,
-              itemBuilder: (_, i) {
-                final d = docs[i].data();
-                final foto = d['fotoUrl'] as String?;
-                final titulo = (d['titulo'] ?? '').toString();
-                final comercioId = d['comercioId'] as String?;
-                return Padding(
-                  padding: const EdgeInsets.only(left: 12, right: 12),
-                  child: GestureDetector(
-                    onTap: () {
-                      if (comercioId == null) return;
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => ComercioDetallePage(comercioId: comercioId),
-                        ),
-                      );
-                    },
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(16),
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          if (foto != null && foto.isNotEmpty)
-                            Image.network(foto, fit: BoxFit.cover)
-                          else
-                            Container(color: Colors.black12),
-                          Align(
-                            alignment: Alignment.bottomLeft,
-                            child: Container(
-                              margin: const EdgeInsets.all(10),
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: Colors.black.withOpacity(.45),
-                                borderRadius: BorderRadius.circular(999),
-                              ),
-                              child: Text(
-                                titulo,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(color: Colors.white),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        );
-      },
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(0, 8, 0, 4),
+      child: SizedBox(
+        height: 148,
+        child: PageView.builder(
+          controller: _pageCtrl,
+          itemCount: _localImages.length,
+          itemBuilder: (_, i) {
+            final img = _localImages[i];
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: Image.asset(img, fit: BoxFit.cover),
+              ),
+            );
+          },
+        ),
+      ),
     );
   }
 }
@@ -894,6 +853,8 @@ class _FiltrosBar extends StatelessWidget {
     required this.onElegirComercio,
     required this.onToggleActivas,
   });
+
+
 
   @override
   Widget build(BuildContext context) {
@@ -937,6 +898,52 @@ class _FiltrosBar extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final String? ctaLabel;
+  final VoidCallback? onCta;
+
+  const _EmptyState({
+    required this.title,
+    required this.subtitle,
+    this.ctaLabel,
+    this.onCta,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.local_offer_outlined, size: 64, color: cs.outline),
+            const SizedBox(height: 12),
+            Text(title, style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 6),
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.outline),
+            ),
+            if (ctaLabel != null && onCta != null) ...[
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: onCta,
+                icon: const Icon(Icons.add),
+                label: Text(ctaLabel!),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

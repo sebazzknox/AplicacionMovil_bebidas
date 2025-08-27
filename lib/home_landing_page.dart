@@ -1,14 +1,37 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // 👈 NUEVO: auth para login anónimo
+
 import 'comercios_page.dart';
 import 'ofertas_page.dart';
-import 'comercios_mock_page.dart';
 import 'comercios_page.dart' as cp;
 import 'admin_state.dart';
-// acceso al panel
 import 'admin_panel_page.dart';
 
 // PIN de administrador (podés cambiarlo cuando quieras)
 const String kAdminPin = '1234';
+
+/// 👇 NUEVO: asegura sesión y asigna rol admin en Firestore
+Future<void> ensureSignedInAndPromoteToAdmin() async {
+  final auth = FirebaseAuth.instance;
+
+  // si no hay usuario, crea sesión anónima
+  if (auth.currentUser == null) {
+    await auth.signInAnonymously();
+  }
+
+  final uid = auth.currentUser!.uid;
+
+  // setea/mergea rol 'admin' en users/{uid}
+  await FirebaseFirestore.instance.collection('users').doc(uid).set(
+    {
+      'role': 'admin',
+      'updatedAt': FieldValue.serverTimestamp(),
+    },
+    SetOptions(merge: true),
+  );
+}
 
 class HomeLandingPage extends StatelessWidget {
   const HomeLandingPage({super.key});
@@ -87,6 +110,22 @@ class HomeLandingPage extends StatelessWidget {
             ),
           ),
 
+          // -------- Banner publicitario arriba del buscador --------
+          const SliverToBoxAdapter(child: _HomePromoBanner()),
+
+          // -------- Chips rápidos de promos --------
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: _PromoChipsRow(
+                onTapChip: (context) {
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const OfertasPage()));
+                },
+              ),
+            ),
+          ),
+
+          // -------- CONTENIDO ORIGINAL --------
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
@@ -185,7 +224,7 @@ class HomeLandingPage extends StatelessWidget {
     );
   }
 
-  // ========= LOGIN ADMIN por PIN =========
+  // ========= LOGIN ADMIN por PIN (ACTUALIZADO) =========
   void _showAdminLogin(BuildContext context) {
     if (adminMode.value == true || cp.kIsAdmin) {
       showModalBottomSheet(
@@ -218,75 +257,52 @@ class HomeLandingPage extends StatelessWidget {
       return;
     }
 
+    // Si no está logueado como admin, pedimos PIN
     final pinCtrl = TextEditingController();
-
-    Future<void> tryLogin(BuildContext ctx) async {
-      final pin = pinCtrl.text.trim();
-      if (pin == kAdminPin) {
-        adminMode.value = true;
-        cp.kIsAdmin = true;
-        if (ctx.mounted) Navigator.pop(ctx);
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Modo admin activado')),
-          );
-        }
-      } else {
-        ScaffoldMessenger.of(ctx).showSnackBar(
-          const SnackBar(content: Text('PIN incorrecto')),
-        );
-      }
-    }
-
-    showModalBottomSheet(
+    showDialog(
       context: context,
-      isScrollControlled: true,
-      builder: (ctx) {
-        return Padding(
-          padding: EdgeInsets.only(
-            left: 16,
-            right: 16,
-            bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
-            top: 16,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Acceso administrador'),
+        content: TextField(
+          controller: pinCtrl,
+          obscureText: true,
+          decoration: const InputDecoration(
+            labelText: 'PIN',
+            prefixIcon: Icon(Icons.lock_outline),
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const ListTile(
-                leading: Icon(Icons.admin_panel_settings_outlined),
-                title: Text('Acceso administrador'),
-                subtitle: Text('Ingresá tu PIN para gestionar'),
-              ),
-              TextField(
-                controller: pinCtrl,
-                obscureText: true,
-                keyboardType: TextInputType.number,
-                textInputAction: TextInputAction.done,
-                onSubmitted: (_) => tryLogin(ctx),
-                decoration: const InputDecoration(
-                  labelText: 'PIN',
-                  prefixIcon: Icon(Icons.password_outlined),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(ctx),
-                    child: const Text('Cancelar'),
-                  ),
-                  const Spacer(),
-                  FilledButton.icon(
-                    icon: const Icon(Icons.login),
-                    label: const Text('Ingresar'),
-                    onPressed: () => tryLogin(ctx),
-                  ),
-                ],
-              ),
-            ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar'),
           ),
-        );
-      },
+          FilledButton(
+            onPressed: () async {
+              final pin = pinCtrl.text.trim();
+
+              if (pin == kAdminPin) {
+                // 👇 Loguea anónimo (si hace falta) y asigna rol admin
+                await ensureSignedInAndPromoteToAdmin();
+
+                adminMode.value = true;
+                cp.kIsAdmin = true;
+
+                if (ctx.mounted) Navigator.pop(ctx);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Modo admin activado')),
+                  );
+                }
+              } else {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(content: Text('PIN incorrecto')),
+                );
+              }
+            },
+            child: const Text('Entrar'),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -334,6 +350,228 @@ class _ActionCard extends StatelessWidget {
                 ),
               ),
               const Icon(Icons.chevron_right),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// ===== Banner publicitario PRO (carrusel local + fade + indicadores) =====
+class _HomePromoBanner extends StatefulWidget {
+  const _HomePromoBanner();
+
+  @override
+  State<_HomePromoBanner> createState() => _HomePromoBannerState();
+}
+
+class _HomePromoBannerState extends State<_HomePromoBanner> {
+  final _pageCtrl = PageController(viewportFraction: .96);
+  final _imgs = const <String>[
+    'assets/banners/imagen2x1.jpg',
+    // 'assets/banners/prueba.jpg',
+  ];
+  int _index = 0;
+  Timer? _t;
+
+  @override
+  void initState() {
+    super.initState();
+    _startAuto();
+  }
+
+  void _startAuto() {
+    _t?.cancel();
+    if (_imgs.length <= 1) return;
+    _t = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (!mounted) return;
+      _index = (_index + 1) % _imgs.length;
+      _pageCtrl.animateToPage(
+        _index,
+        duration: const Duration(milliseconds: 450),
+        curve: Curves.easeOut,
+      );
+      setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _t?.cancel();
+    _pageCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(.10),
+              blurRadius: 12,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(18),
+          child: Stack(
+            alignment: Alignment.bottomCenter,
+            children: [
+              AspectRatio(
+                aspectRatio: 16 / 9,
+                child: PageView.builder(
+                  controller: _pageCtrl,
+                  onPageChanged: (i) => setState(() => _index = i),
+                  itemCount: _imgs.length,
+                  itemBuilder: (_, i) {
+                    return Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Image.asset(_imgs[i], fit: BoxFit.cover),
+                        IgnorePointer(
+                          child: Container(
+                            decoration: const BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  Color(0x33FFFFFF),
+                                  Colors.transparent,
+                                  Colors.transparent,
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+              if (_imgs.length > 1)
+                Positioned(
+                  bottom: 8,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: cs.surface.withOpacity(.65),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: List.generate(
+                          _imgs.length,
+                          (i) => _Dot(active: i == _index),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Dot extends StatelessWidget {
+  final bool active;
+  const _Dot({required this.active});
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      margin: const EdgeInsets.symmetric(horizontal: 3),
+      width: active ? 10 : 6,
+      height: 6,
+      decoration: BoxDecoration(
+        color: active
+            ? Theme.of(context).colorScheme.primary
+            : Theme.of(context).colorScheme.outline.withOpacity(.6),
+        borderRadius: BorderRadius.circular(999),
+      ),
+    );
+  }
+}
+
+/// ===== Fila de chips promocionales =====
+class _PromoChipsRow extends StatelessWidget {
+  final void Function(BuildContext) onTapChip;
+  const _PromoChipsRow({required this.onTapChip});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          _PromoChip(
+            label: '2x1',
+            icon: Icons.local_drink_outlined,
+            color: cs.primaryContainer,
+            onTap: () => onTapChip(context),
+          ),
+          const SizedBox(width: 8),
+          _PromoChip(
+            label: 'Happy Hour',
+            icon: Icons.schedule_outlined,
+            color: cs.secondaryContainer,
+            onTap: () => onTapChip(context),
+          ),
+          const SizedBox(width: 8),
+          _PromoChip(
+            label: 'Envío gratis',
+            icon: Icons.local_shipping_outlined,
+            color: cs.tertiaryContainer,
+            onTap: () => onTapChip(context),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PromoChip extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _PromoChip({
+    required this.label,
+    required this.icon,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final onColor = Theme.of(context).colorScheme.onPrimaryContainer;
+    return Material(
+      color: color.withOpacity(.6),
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            children: [
+              Icon(icon, size: 18, color: onColor),
+              const SizedBox(width: 6),
+              Text(label, style: TextStyle(color: onColor)),
             ],
           ),
         ),

@@ -4,7 +4,6 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-import 'home_landing_page.dart';
 import 'comercios_page.dart';
 import 'bebidas_page.dart';
 import 'splash_screen.dart';

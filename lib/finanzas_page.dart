@@ -8,7 +8,6 @@ import 'package:intl/intl.dart';
 import 'package:fl_chart/fl_chart.dart';
 
 import 'comercios_page.dart' show kIsAdmin;
-import 'ui/app_states.dart'; // ⬅️ estados de carga / error / vacío
 
 class FinanzasPage extends StatefulWidget {
   const FinanzasPage({super.key});
@@ -65,97 +64,100 @@ class _FinanzasPageState extends State<FinanzasPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Finanzas'),
-        actions: [
-          IconButton(
-            tooltip: 'Exportar CSV',
-            onPressed: _exportarCsv,
-            icon: const Icon(Icons.file_download_outlined),
-          ),
-          IconButton(
-            tooltip: 'Elegir mes',
-            onPressed: _elegirMes,
-            icon: const Icon(Icons.calendar_month_outlined),
-          ),
-          const SizedBox(width: 4),
-        ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(88),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: SegmentedButton<String>(
-                        segments: const [
-                          ButtonSegment(
-                            value: 'resumen',
-                            icon: Icon(Icons.analytics_outlined),
-                            label: Text('Resumen'),
-                          ),
-                          ButtonSegment(
-                            value: 'ingresos',
-                            icon: Icon(Icons.trending_up),
-                            label: Text('Ingresos'),
-                          ),
-                          ButtonSegment(
-                            value: 'gastos',
-                            icon: Icon(Icons.trending_down),
-                            label: Text('Gastos'),
-                          ),
-                        ],
-                        selected: {_tab},
-                        onSelectionChanged: (s) =>
-                            setState(() => _tab = s.first),
-                        multiSelectionEnabled: false,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    // Chip del mes actual del filtro
-                    InputChip(
-                      label: Text(mesLabel),
-                      onPressed: _elegirMes,
-                      avatar: const Icon(Icons.filter_list),
-                    ),
-                  ],
+  title: const Text('Finanzas'),
+  actions: [
+    IconButton(
+      tooltip: 'Exportar CSV',
+      onPressed: _exportarCsv,
+      icon: const Icon(Icons.file_download_outlined),
+    ),
+    IconButton(
+      tooltip: 'Elegir mes',
+      onPressed: _elegirMes,
+      icon: const Icon(Icons.calendar_month_outlined),
+    ),
+    const SizedBox(width: 4),
+  ],
+  bottom: PreferredSize(
+    preferredSize: const Size.fromHeight(110), // 🔹 menos alto
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+      child: Column(
+        children: [
+          // 🔹 Scroll horizontal para que no se corte el segmented
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(
+                  value: 'resumen',
+                  icon: Icon(Icons.analytics_outlined),
+                  label: Text('Resumen'),
                 ),
-                const SizedBox(height: 8),
-                // Filtro por comercio
-                Row(
-                  children: [
-                    Expanded(
-                      child: _cargandoComercios
-                          ? const LinearProgressIndicator(minHeight: 2)
-                          : DropdownButtonHideUnderline(
-                              child: DropdownButton<String?>(
-                                isExpanded: true,
-                                value: _comercioFiltroId,
-                                items: [
-                                  const DropdownMenuItem<String?>(
-                                    value: null,
-                                    child: Text('Todos los comercios'),
-                                  ),
-                                  ..._comercios.map((c) => DropdownMenuItem<String?>(
-                                        value: c.id,
-                                        child: Text(c.nombre.isEmpty ? c.id : c.nombre),
-                                      )),
-                                ],
-                                onChanged: (v) {
-                                  setState(() => _comercioFiltroId = v);
-                                },
-                              ),
-                            ),
-                    ),
-                  ],
+                ButtonSegment(
+                  value: 'ingresos',
+                  icon: Icon(Icons.trending_up),
+                  label: Text('Ingresos'),
+                ),
+                ButtonSegment(
+                  value: 'gastos',
+                  icon: Icon(Icons.trending_down),
+                  label: Text('Gastos'),
                 ),
               ],
+              selected: {_tab},
+              onSelectionChanged: (s) =>
+                  setState(() => _tab = s.first),
+              multiSelectionEnabled: false,
             ),
           ),
-        ),
+          const SizedBox(height: 8),
+          // 🔹 Wrap para que los filtros bajen de línea si no entran
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              InputChip(
+                label: Text(_mesElegido == null
+                    ? 'Todos los meses'
+                    : DateFormat('MMMM yyyy', 'es').format(_mesElegido!)),
+                avatar: const Icon(Icons.filter_list),
+                onPressed: _elegirMes,
+              ),
+              _cargandoComercios
+                  ? const SizedBox(
+                      width: 100,
+                      child: LinearProgressIndicator(minHeight: 2))
+                  : DropdownButtonHideUnderline(
+                      child: DropdownButton<String?>(
+                        value: _comercioFiltroId,
+                        items: [
+                          const DropdownMenuItem<String?>(
+                            value: null,
+                            child: Text('Todos los comercios'),
+                          ),
+                          ..._comercios.map(
+                            (c) => DropdownMenuItem<String?>(
+                              value: c.id,
+                              child: Text(
+                                c.nombre.isEmpty ? c.id : c.nombre,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                        ],
+                        onChanged: (v) {
+                          setState(() => _comercioFiltroId = v);
+                        },
+                      ),
+                    ),
+            ],
+          ),
+        ],
       ),
-
+    ),
+  ),
+),
       body: _buildBody(),
 
       floatingActionButton: kIsAdmin
@@ -484,20 +486,23 @@ class _MovimientosList extends StatelessWidget {
       stream: q.snapshots(),
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
-          return const AppLoading(text: 'Cargando movimientos...');
+          return const Center(child: CircularProgressIndicator());
         }
-        if (snap.hasError) {
-          return const AppError('No se pudieron cargar los datos.');
-        }
-
         final docs = snap.data?.docs ?? [];
         if (docs.isEmpty) {
-          return const AppEmpty(
-            title: 'Sin movimientos',
-            subtitle: 'Aún no hay registros para el filtro elegido.',
-            icon: Icons.receipt_long_outlined,
-          );
-        }
+         return _EmptyState(
+    title: 'Sin movimientos',
+    subtitle: 'No hay ${tipo == 'ingreso' ? 'ingresos' : 'gastos'} para el período o comercio seleccionado.',
+    ctaLabel: kIsAdmin ? 'Cargar movimiento' : null,
+    onCta: kIsAdmin ? () {
+      // Abrimos el diálogo de nuevo movimiento del padre vía ScaffoldMessenger
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Usá el botón “Nuevo mov.” para agregar uno')),
+      );
+    } : null,
+  );
+}
+        
 
         final total = docs.fold<num>(0, (a, e) => a + ((e.data()['monto'] ?? 0) as num));
         final signo = tipo == 'ingreso' ? '+' : '-';
@@ -707,22 +712,16 @@ class _ResumenFinanzas extends StatelessWidget {
       stream: q.snapshots(),
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
-          return const AppLoading(text: 'Cargando resumen...');
+          return const Center(child: CircularProgressIndicator());
         }
-        if (snap.hasError) {
-          return const AppError('No se pudieron cargar los datos.');
-        }
-
         final docs = snap.data?.docs ?? [];
         final series = _acumularPorMes(docs, desde, meses: mesElegido == null ? 6 : 1);
-
         if (series.isEmpty) {
-          return const AppEmpty(
-            title: 'Sin datos',
-            subtitle: 'Aún no hay movimientos para el rango elegido.',
-            icon: Icons.bar_chart_rounded,
-          );
-        }
+        return _EmptyState(
+        title: 'Sin datos',
+        subtitle: 'No hay movimientos en el período seleccionado.',
+  );
+}
 
         return ListView(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
@@ -942,5 +941,53 @@ class ListToCsvConverter {
       s = '"${s.replaceAll('"', '""')}"';
     }
     return s;
+  }
+
+  
+}
+
+class _EmptyState extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final String? ctaLabel;
+  final VoidCallback? onCta;
+
+  const _EmptyState({
+    required this.title,
+    required this.subtitle,
+    this.ctaLabel,
+    this.onCta,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.local_offer_outlined, size: 64, color: cs.outline),
+            const SizedBox(height: 12),
+            Text(title, style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 6),
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.outline),
+            ),
+            if (ctaLabel != null && onCta != null) ...[
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: onCta,
+                icon: const Icon(Icons.add),
+                label: Text(ctaLabel!),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 }

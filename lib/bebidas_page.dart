@@ -411,7 +411,7 @@ class _BebidasPageState extends State<BebidasPage> {
           await _deleteImageByPath(data?['imagenPath'] as String?);
 
           // subir nueva y guardar url+path
-          final uploaded = await _uploadImagenYObtenerUrl(bebidaId!);
+          final uploaded = await _uploadImagenYObtenerUrl(bebidaId);
           if (uploaded != null) {
             await bebidasCol.doc(bebidaId).update({
               'imagenUrl': uploaded.url,
