@@ -1,474 +1,664 @@
-// lib/bebidas_page.dart
+// bebidas_page.dart
 import 'dart:io';
+import 'dart:math' show min;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import 'admin_state.dart'; // adminMode (ValueNotifier<bool>)
+import 'comercios_page.dart' show kIsAdmin;
+
 class BebidasPage extends StatefulWidget {
   const BebidasPage({
     super.key,
-    this.initialComercioId,
-    this.initialComercioNombre,
+    required this.initialComercioId,
+    required this.initialComercioNombre,
   });
 
-  // (1) soporte para llegar pre-seleccionado desde ComercioDetallePage
-  final String? initialComercioId;
-  final String? initialComercioNombre;
+  final String initialComercioId;
+  final String initialComercioNombre;
 
   @override
   State<BebidasPage> createState() => _BebidasPageState();
 }
 
 class _BebidasPageState extends State<BebidasPage> {
-  // --- Comercio seleccionado ---
-  String? _comercioId;
-  String? _comercioNombre;
+  final _busquedaCtrl = TextEditingController();
+  String _q = '';
+  String _cat = 'todas';        // ahora solo: 'todas' | 'cervezas'
+  bool _soloPromos = false;     // “Ofertas”
+  bool _mostrarInactivas = false; // visible solo para admin
 
-  // --- Imagen (ImagePicker) ---
   final _picker = ImagePicker();
-  XFile? _imagenSeleccionada;
+  XFile? _fotoTmp;
 
   @override
-  void initState() {
-    super.initState();
-    // Si venimos desde ComercioDetallePage, arrancamos ya posicionados
-    _comercioId = widget.initialComercioId;
-    _comercioNombre = widget.initialComercioNombre;
+  void dispose() {
+    _busquedaCtrl.dispose();
+    super.dispose();
   }
 
-  // Colección de bebidas del comercio seleccionado
-  CollectionReference<Map<String, dynamic>>? get _bebidasCol {
-    if (_comercioId == null) return null;
+  // ---------- Helpers de datos ----------
+  CollectionReference<Map<String, dynamic>> _bebidasCol(String comercioId) {
     return FirebaseFirestore.instance
         .collection('comercios')
-        .doc(_comercioId)
+        .doc(comercioId)
         .collection('bebidas');
   }
 
-  // ----------------------------------------
-  // Helpers de imagen
-  // ----------------------------------------
-
-  // Elegir imagen desde galería (con compresión)
-  Future<void> _pickImage() async {
-    final x = await _picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 70, // reduce peso
-    );
-    if (x != null) {
-      setState(() => _imagenSeleccionada = x);
-    }
+  Stream<QuerySnapshot<Map<String, dynamic>>> _streamBebidas(
+      String comercioId) {
+    return _bebidasCol(comercioId).orderBy('nombre').snapshots();
   }
 
-  // Subir imagen a Storage y devolver URL + path interno
-  // Guardamos: comercios/{comercioId}/bebidas/{bebidaId}.jpg
-  Future<({String url, String path})?> _uploadImagenYObtenerUrl(String bebidaId) async {
-    if (_imagenSeleccionada == null || _comercioId == null) return null;
+  List<Map<String, dynamic>> _aplicarFiltros(
+      List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
+    final q = _q.trim().toLowerCase();
 
-    final file = File(_imagenSeleccionada!.path);
-    final path = 'comercios/$_comercioId/bebidas/$bebidaId.jpg';
-    final ref = FirebaseStorage.instance.ref().child(path);
+    return docs
+        .map((d) => {'id': d.id, ...d.data()})
+        .where((m) {
+          // activo (si no es admin)
+          if (!_mostrarInactivas) {
+            final activo = (m['activo'] ?? true) == true;
+            if (!activo) return false;
+          }
+          // ofertas
+          if (_soloPromos && (m['promo'] != true)) return false;
 
+          // categoría (solo ‘cervezas’ o ‘todas’)
+          if (_cat != 'todas') {
+            final c = (m['categoria'] ?? '').toString().toLowerCase();
+            if (c != 'cervezas') return false;
+          }
+
+          // búsqueda
+          if (q.isEmpty) return true;
+          final nom = (m['nombre'] ?? '').toString().toLowerCase();
+          final marca = (m['marca'] ?? '').toString().toLowerCase();
+          return nom.contains(q) || marca.contains(q);
+        })
+        .toList();
+  }
+
+  // ---------- Storage ----------
+  Future<void> _pickFoto(StateSetter setLocal) async {
+    final x = await _picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 80,
+    );
+    if (x != null) setLocal(() => _fotoTmp = x);
+  }
+
+  Future<({String url, String path})?> _uploadFoto(
+      String comercioId, String bebidaId) async {
+    if (_fotoTmp == null) return null;
+    final file = File(_fotoTmp!.path);
+    final path = 'bebidas/$comercioId/$bebidaId.jpg';
+    final ref = FirebaseStorage.instance.ref(path);
     await ref.putFile(file, SettableMetadata(contentType: 'image/jpeg'));
     final url = await ref.getDownloadURL();
     return (url: url, path: path);
   }
 
-  // Borrar una imagen de Storage por su path
-  Future<void> _deleteImageByPath(String? path) async {
+  Future<void> _deleteFotoByPath(String? path) async {
     if (path == null || path.isEmpty) return;
     try {
-      await FirebaseStorage.instance.ref().child(path).delete();
-    } catch (_) {
-      // Si no existe, lo ignoramos en dev
-    }
+      await FirebaseStorage.instance.ref(path).delete();
+    } catch (_) {}
   }
 
-  // ----------------------------------------
-  // UI
-  // ----------------------------------------
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_comercioNombre ?? 'Elegí un comercio'),
-        actions: [
-          IconButton(
-            tooltip: 'Cambiar comercio',
-            icon: const Icon(Icons.store_mall_directory),
-            onPressed: _elegirComercio,
-          ),
-        ],
-      ),
-      body: _buildBody(),
-      floatingActionButton: _bebidasCol == null
-          ? null
-          : FloatingActionButton(
-              onPressed: () => _showEditDialog(context, _bebidasCol!, null, null),
-              child: const Icon(Icons.add),
-            ),
-    );
+  // ---------- CRUD ----------
+  Future<void> _nuevaBebida() async {
+    await _abrirForm();
   }
 
-  Widget _buildBody() {
-    if (_bebidasCol == null) {
-      return const Center(child: Text('Seleccioná un comercio para ver sus bebidas'));
-    }
-
-    // Escucha en tiempo real los cambios
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: _bebidasCol!.orderBy('nombre').snapshots(),
-      builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (snap.hasError) return Center(child: Text('Error: ${snap.error}'));
-
-        final docs = snap.data?.docs ?? [];
-        if (docs.isEmpty) {
-          return const Center(child: Text('No hay bebidas cargadas.'));
-        }
-
-        return ListView.separated(
-          itemCount: docs.length,
-          separatorBuilder: (_, __) => const Divider(height: 1),
-          itemBuilder: (context, i) {
-            final doc = docs[i];
-            final data = doc.data();
-            final nombre = (data['nombre'] ?? '') as String;
-            final precio = data['precio'] ?? 0;
-            final disponible = (data['disponible'] ?? true) as bool;
-            final imagenUrl = data['imagenUrl'] as String?;
-
-            return Dismissible(
-              key: ValueKey(doc.id),
-              direction: DismissDirection.endToStart,
-              background: Container(
-                color: Colors.red,
-                alignment: Alignment.centerRight,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: const Icon(Icons.delete, color: Colors.white),
-              ),
-              confirmDismiss: (_) => _confirmDelete(context, nombre),
-              onDismissed: (_) async {
-                // borrar imagen del Storage si existía
-                await _deleteImageByPath(data['imagenPath'] as String?);
-                await _bebidasCol!.doc(doc.id).delete();
-              },
-              child: ListTile(
-                leading: imagenUrl == null
-                    ? const CircleAvatar(child: Icon(Icons.local_drink))
-                    : CircleAvatar(backgroundImage: NetworkImage(imagenUrl)),
-                title: Text(nombre.isEmpty ? '—' : nombre),
-                subtitle: Text('Precio: \$ $precio'),
-                trailing: Icon(
-                  disponible ? Icons.check_circle : Icons.cancel,
-                  color: disponible ? Colors.green : Colors.red,
-                ),
-                onTap: () => _showEditDialog(context, _bebidasCol!, doc.id, data),
-              ),
-            );
-          },
-        );
-      },
-    );
+  Future<void> _editarBebida(String id, Map<String, dynamic> data) async {
+    await _abrirForm(editId: id, data: data);
   }
 
-  // ----------------------------------------
-  // Selector de comercio
-  // ----------------------------------------
-
-  Future<void> _elegirComercio() async {
-    final col = FirebaseFirestore.instance.collection('comercios');
-
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (ctx) {
-        return SafeArea(
-          child: SizedBox(
-            height: MediaQuery.of(ctx).size.height * 0.7,
-            child: Column(
-              children: [
-                const ListTile(title: Text('Seleccionar comercio')),
-                Expanded(
-                  child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                    stream: col.orderBy('nombre').snapshots(),
-                    builder: (context, snap) {
-                      if (!snap.hasData) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
-                      final docs = snap.data!.docs;
-                      if (docs.isEmpty) {
-                        return const Center(child: Text('No hay comercios. Creá uno.'));
-                      }
-                      return ListView.builder(
-                        itemCount: docs.length,
-                        itemBuilder: (_, i) {
-                          final d = docs[i];
-                          final data = d.data();
-                          final nombre = (data['nombre'] ?? '') as String;
-                          return ListTile(
-                            leading: const Icon(Icons.storefront),
-                            title: Text(nombre),
-                            onTap: () {
-                              setState(() {
-                                _comercioId = d.id;
-                                _comercioNombre = nombre;
-                              });
-                              Navigator.pop(ctx);
-                            },
-                          );
-                        },
-                      );
-                    },
-                  ),
-                ),
-                const Divider(height: 1),
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.add_business),
-                    label: const Text('Nuevo comercio'),
-                    onPressed: () async {
-                      Navigator.pop(ctx);
-                      await _crearComercioDialog();
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Future<void> _crearComercioDialog() async {
-    final controller = TextEditingController();
+  Future<void> _eliminarBebida(String id, Map<String, dynamic> data) async {
     final ok = await showDialog<bool>(
           context: context,
           builder: (_) => AlertDialog(
-            title: const Text('Nuevo comercio'),
-            content: TextField(
-              controller: controller,
-              decoration: const InputDecoration(labelText: 'Nombre del comercio'),
-            ),
+            title: const Text('Eliminar bebida'),
+            content: Text(
+                '¿Eliminar "${data['nombre'] ?? 'bebida'}"? Esta acción no se puede deshacer.'),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
-              ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Crear')),
+              TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancelar')),
+              FilledButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Eliminar')),
             ],
           ),
         ) ??
         false;
-
     if (!ok) return;
-    final nombre = controller.text.trim();
-    if (nombre.isEmpty) return;
-
-    final col = FirebaseFirestore.instance.collection('comercios');
-    final docRef = await col.add({
-      'nombre': nombre,
-      'creado': FieldValue.serverTimestamp(),
-    });
-
-    setState(() {
-      _comercioId = docRef.id;
-      _comercioNombre = nombre;
-    });
+    await _deleteFotoByPath(data['fotoPath'] as String?);
+    await _bebidasCol(widget.initialComercioId).doc(id).delete();
   }
 
-  // ----------------------------------------
-  // Alta / Edición con imagen
-  // ----------------------------------------
-  Future<void> _showEditDialog(
-    BuildContext context,
-    CollectionReference<Map<String, dynamic>> bebidasCol,
-    String? bebidaId,
-    Map<String, dynamic>? data,
-  ) async {
-    final isEdit = bebidaId != null;
-    final nombreCtrl = TextEditingController(text: data?['nombre']?.toString() ?? '');
-    final precioCtrl = TextEditingController(text: data?['precio']?.toString() ?? '');
-    bool disponible = (data?['disponible'] ?? true) as bool;
+  Future<void> _abrirForm({String? editId, Map<String, dynamic>? data}) async {
+    final isEdit = editId != null;
+    final nombreCtrl =
+        TextEditingController(text: (data?['nombre'] ?? '').toString());
+    final marcaCtrl =
+        TextEditingController(text: (data?['marca'] ?? '').toString());
+    final volCtrl = TextEditingController(
+        text: (data?['volumenMl'] == null) ? '' : (data!['volumenMl']).toString());
+    final precioCtrl = TextEditingController(
+        text: (data?['precio'] == null) ? '' : data!['precio'].toString());
+    final promoPrecioCtrl = TextEditingController(
+        text: (data?['promoPrecio'] == null) ? '' : data!['promoPrecio'].toString());
+    final descCtrl =
+        TextEditingController(text: (data?['descripcion'] ?? '').toString());
 
-    // para previsualizar imagen ya guardada
-    final imagenUrlActual = data?['imagenUrl'] as String?;
-    String? imagenUrlPreview = imagenUrlActual;
+    String categoria = (data?['categoria'] ?? 'cervezas').toString().toLowerCase();
+    bool promo = (data?['promo'] ?? false) == true;
+    bool activo = (data?['activo'] ?? true) == true;
+
+    String? fotoUrlPreview = data?['fotoUrl'] as String?;
+    _fotoTmp = null;
+
+    final categorias = <String>['cervezas']; // solo una real, el resto se filtra por UI
 
     final ok = await showDialog<bool>(
           context: context,
           builder: (_) => StatefulBuilder(
-            builder: (ctx, setLocalState) => AlertDialog(
-              title: Text(isEdit ? 'Editar bebida' : 'Nueva bebida'),
+            builder: (ctx, setLocal) => AlertDialog(
+              title: Text(isEdit
+                  ? 'Editar bebida'
+                  : 'Nueva bebida en ${widget.initialComercioNombre}'),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    TextField(
-                      controller: nombreCtrl,
-                      decoration: const InputDecoration(labelText: 'Nombre'),
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: precioCtrl,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: 'Precio'),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        const Text('Disponible'),
-                        const Spacer(),
-                        Switch(
-                          value: disponible,
-                          onChanged: (v) => setLocalState(() => disponible = v),
+                    GestureDetector(
+                      onTap: () => _pickFoto(setLocal),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: SizedBox(
+                          width: 120,
+                          height: 120,
+                          child: _fotoTmp != null
+                              ? Image.file(File(_fotoTmp!.path), fit: BoxFit.cover)
+                              : (fotoUrlPreview != null && fotoUrlPreview!.isNotEmpty)
+                                  ? Image.network(fotoUrlPreview!, fit: BoxFit.cover)
+                                  : Container(
+                                      color: Colors.black12,
+                                      child: const Icon(Icons.add_a_photo, size: 36),
+                                    ),
                         ),
-                      ],
+                      ),
                     ),
                     const SizedBox(height: 12),
+                    if (_fotoTmp != null || (fotoUrlPreview ?? '').isNotEmpty)
+                      TextButton.icon(
+                        onPressed: () => setLocal(() {
+                          _fotoTmp = null;
+                          fotoUrlPreview = null;
+                        }),
+                        icon: const Icon(Icons.delete_outline),
+                        label: const Text('Quitar foto'),
+                      ),
+                    const SizedBox(height: 8),
 
-                    if (_imagenSeleccionada != null)
-                      Image.file(File(_imagenSeleccionada!.path), height: 140)
-                    else if ((imagenUrlPreview ?? '').isNotEmpty)
-                      Image.network(imagenUrlPreview!, height: 140)
-                    else
-                      const SizedBox.shrink(),
+                    TextField(
+                      controller: nombreCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Nombre',
+                        prefixIcon: Icon(Icons.local_drink),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: marcaCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Marca',
+                        prefixIcon: Icon(Icons.style_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+
+                    DropdownButtonFormField<String>(
+                      value: categorias.contains(categoria) ? categoria : 'cervezas',
+                      items: categorias
+                          .map((c) => DropdownMenuItem(
+                                value: c,
+                                child: Text(c[0].toUpperCase() + c.substring(1)),
+                              ))
+                          .toList(),
+                      onChanged: (v) => categoria = v ?? 'cervezas',
+                      decoration: const InputDecoration(
+                        labelText: 'Categoría',
+                        prefixIcon: Icon(Icons.category_outlined),
+                      ),
+                    ),
                     const SizedBox(height: 8),
 
                     Row(
                       children: [
-                        TextButton.icon(
-                          onPressed: () async {
-                            await _pickImage();
-                            if (_imagenSeleccionada != null) {
-                              setLocalState(() {
-                                imagenUrlPreview = null; // oculto la previa de red
-                              });
-                            }
-                          },
-                          icon: const Icon(Icons.image),
-                          label: const Text('Elegir imagen'),
+                        Expanded(
+                          child: TextField(
+                            controller: volCtrl,
+                            keyboardType:
+                                const TextInputType.numberWithOptions(decimal: false),
+                            decoration: const InputDecoration(
+                              labelText: 'Volumen (ml)',
+                              prefixIcon: Icon(Icons.local_bar_outlined),
+                            ),
+                          ),
                         ),
                         const SizedBox(width: 8),
-                        if (_imagenSeleccionada != null || (imagenUrlPreview ?? '').isNotEmpty)
-                          TextButton.icon(
-                            onPressed: () {
-                              setLocalState(() {
-                                _imagenSeleccionada = null;
-                                imagenUrlPreview = null;
-                              });
-                            },
-                            icon: const Icon(Icons.delete_outline),
-                            label: const Text('Quitar imagen'),
+                        Expanded(
+                          child: TextField(
+                            controller: precioCtrl,
+                            keyboardType:
+                                const TextInputType.numberWithOptions(decimal: true),
+                            decoration: const InputDecoration(
+                              labelText: 'Precio',
+                              prefixIcon: Icon(Icons.attach_money),
+                            ),
                           ),
+                        ),
                       ],
+                    ),
+                    const SizedBox(height: 8),
+
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: promo,
+                      onChanged: (v) => setLocal(() => promo = v),
+                      title: const Text('Tiene promo'),
+                    ),
+                    if (promo)
+                      TextField(
+                        controller: promoPrecioCtrl,
+                        keyboardType:
+                            const TextInputType.numberWithOptions(decimal: true),
+                        decoration: const InputDecoration(
+                          labelText: 'Precio promo',
+                          prefixIcon: Icon(Icons.local_offer_outlined),
+                        ),
+                      ),
+                    const SizedBox(height: 8),
+
+                    TextField(
+                      controller: descCtrl,
+                      maxLines: 3,
+                      decoration: const InputDecoration(
+                        labelText: 'Descripción',
+                        prefixIcon: Icon(Icons.notes_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+
+                    CheckboxListTile(
+                      value: activo,
+                      onChanged: (v) => setLocal(() => activo = v ?? true),
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Activo'),
+                      controlAffinity: ListTileControlAffinity.leading,
                     ),
                   ],
                 ),
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.pop(context, false),
-                  child: const Text('Cerrar'),
-                ),
-                ElevatedButton(
-                  onPressed: () => Navigator.pop(context, true),
-                  child: const Text('Guardar cambios'),
-                ),
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('Cancelar')),
+                FilledButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    child: const Text('Guardar')),
               ],
             ),
           ),
         ) ??
         false;
 
-    if (!ok) {
-      setState(() => _imagenSeleccionada = null);
+    if (!ok) return;
+
+    final nombre = nombreCtrl.text.trim();
+    if (nombre.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Poné un nombre para la bebida')),
+        );
+      }
       return;
     }
 
-    final nombre = nombreCtrl.text.trim();
-    final precio = num.tryParse(precioCtrl.text.trim()) ?? 0;
-
-    final basePayload = <String, dynamic>{
+    final payload = <String, dynamic>{
       'nombre': nombre,
-      'precio': precio,
-      'disponible': disponible,
+      'marca': marcaCtrl.text.trim(),
+      'categoria': categoria, // 'cervezas'
+      'volumenMl': int.tryParse(volCtrl.text.trim()),
+      'precio': double.tryParse(precioCtrl.text.trim()),
+      'promo': promo,
+      'promoPrecio': promo ? double.tryParse(promoPrecioCtrl.text.trim()) : null,
+      'descripcion': descCtrl.text.trim(),
+      'activo': activo,
       'updatedAt': FieldValue.serverTimestamp(),
     };
 
-    try {
-      if (isEdit) {
-        // 1) Actualizar datos básicos
-        await bebidasCol.doc(bebidaId).update(basePayload);
+    final col = _bebidasCol(widget.initialComercioId);
 
-        // 2) Si se eligió NUEVA imagen:
-        if (_imagenSeleccionada != null) {
-          // borrar imagen anterior si había
-          await _deleteImageByPath(data?['imagenPath'] as String?);
-
-          // subir nueva y guardar url+path
-          final uploaded = await _uploadImagenYObtenerUrl(bebidaId);
-          if (uploaded != null) {
-            await bebidasCol.doc(bebidaId).update({
-              'imagenUrl': uploaded.url,
-              'imagenPath': uploaded.path,
-            });
-          }
-        } else if ((imagenUrlPreview ?? '').isEmpty && (data?['imagenPath'] != null)) {
-          // Caso: usuario presionó "Quitar imagen"
-          await _deleteImageByPath(data?['imagenPath'] as String?);
-          await bebidasCol.doc(bebidaId).update({
-            'imagenUrl': FieldValue.delete(),
-            'imagenPath': FieldValue.delete(),
-          });
+    if (isEdit) {
+      await col.doc(editId).update(payload);
+      if (_fotoTmp != null) {
+        await _deleteFotoByPath(data?['fotoPath'] as String?);
+        final up = await _uploadFoto(widget.initialComercioId, editId!);
+        if (up != null) {
+          await col.doc(editId).update({'fotoUrl': up.url, 'fotoPath': up.path});
         }
-      } else {
-        // CREAR
-        final docRef = await bebidasCol.add({
-          ...basePayload,
-          'createdAt': FieldValue.serverTimestamp(),
+      } else if ((fotoUrlPreview ?? '').isEmpty && (data?['fotoPath'] != null)) {
+        await _deleteFotoByPath(data?['fotoPath'] as String?);
+        await col.doc(editId).update({
+          'fotoUrl': FieldValue.delete(),
+          'fotoPath': FieldValue.delete(),
         });
-
-        if (_imagenSeleccionada != null) {
-          final uploaded = await _uploadImagenYObtenerUrl(docRef.id);
-          if (uploaded != null) {
-            await docRef.update({
-              'imagenUrl': uploaded.url,
-              'imagenPath': uploaded.path,
-            });
-          }
+      }
+    } else {
+      final ref = await col.add({
+        ...payload,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      if (_fotoTmp != null) {
+        final up = await _uploadFoto(widget.initialComercioId, ref.id);
+        if (up != null) {
+          await ref.update({'fotoUrl': up.url, 'fotoPath': up.path});
         }
       }
-    } finally {
-      setState(() => _imagenSeleccionada = null);
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(isEdit ? 'Bebida actualizada' : 'Bebida creada')),
+      );
+      setState(() => _fotoTmp = null);
     }
   }
 
-  // ----------------------------------------
-  // Confirmación de borrado
-  // ----------------------------------------
-  Future<bool> _confirmDelete(BuildContext context, String nombre) async {
-    return await showDialog<bool>(
-          context: context,
-          builder: (_) => AlertDialog(
-            title: const Text('Confirmar borrado'),
-            content: Text('¿Eliminar "$nombre"? Esta acción no se puede deshacer.'),
+  // ---------- UI ----------
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: adminMode,
+      builder: (context, isAdmin, _) {
+        final admin = kIsAdmin || isAdmin;
+        final cs = Theme.of(context).colorScheme;
+
+        return Scaffold(
+          appBar: AppBar(
+            title: Text('Bebidas · ${widget.initialComercioNombre}'),
             actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Cancelar'),
+              if (admin)
+                IconButton(
+                  tooltip: 'Nueva bebida',
+                  onPressed: _nuevaBebida,
+                  icon: const Icon(Icons.add),
+                ),
+            ],
+          ),
+          body: Column(
+            children: [
+              // Búsqueda
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                child: TextField(
+                  controller: _busquedaCtrl,
+                  decoration: InputDecoration(
+                    hintText: 'Buscar por nombre o marca',
+                    prefixIcon: const Icon(Icons.search),
+                    filled: true,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                  onChanged: (v) => setState(() => _q = v),
+                ),
               ),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('Eliminar'),
+
+              // ======== Filtros (3 pastillas) ========
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  children: [
+                    _Pill(
+                      icon: Icons.filter_alt_outlined,
+                      label: 'Todas',
+                      selected: _cat == 'todas',
+                      onTap: () => setState(() => _cat = 'todas'),
+                    ),
+                    const SizedBox(width: 8),
+                    _Pill(
+                      icon: Icons.local_bar_outlined,
+                      label: 'Cervezas',
+                      selected: _cat == 'cervezas',
+                      onTap: () => setState(() => _cat = 'cervezas'),
+                    ),
+                    const SizedBox(width: 8),
+                    _Pill(
+                      icon: Icons.local_offer_outlined,
+                      label: 'Ofertas',
+                      selected: _soloPromos,
+                      tint: Colors.pink,
+                      onTap: () => setState(() => _soloPromos = !_soloPromos),
+                    ),
+                    if (admin) ...[
+                     
+                    ],
+                  ],
+                ),
+              ),
+              
+
+              // Lista
+              Expanded(
+                child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: _streamBebidas(widget.initialComercioId),
+                  builder: (context, snap) {
+                    if (snap.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    if (snap.hasError) {
+                      return Center(child: Text('Error: ${snap.error}'));
+                    }
+                    final docs = snap.data?.docs ?? [];
+                    final items = _aplicarFiltros(docs);
+
+                    if (items.isEmpty) {
+                      return const Center(
+                        child: Text('No hay bebidas para mostrar.'),
+                      );
+                    }
+
+                    return ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                      itemCount: items.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (_, i) {
+                        final m = items[i];
+                        final id = m['id'] as String;
+                        final nombre = (m['nombre'] ?? '') as String;
+                        final marca = (m['marca'] ?? '') as String? ?? '';
+                        final cat = (m['categoria'] ?? '') as String? ?? '';
+                        final vol = (m['volumenMl'] ?? 0) as int? ?? 0;
+                        final precio = (m['precio'] ?? 0).toString();
+                        final promo = (m['promo'] ?? false) == true;
+                        final promoPrecio = (m['promoPrecio'] ?? 0).toString();
+                        final fotoUrl = m['fotoUrl'] as String?;
+                        final activo = (m['activo'] ?? true) == true;
+
+                        return Material(
+                          color: Theme.of(context).colorScheme.surface,
+                          elevation: 0.5,
+                          borderRadius: BorderRadius.circular(16),
+                          child: ListTile(
+                            contentPadding: const EdgeInsets.all(12),
+                            leading: _Thumb(url: fotoUrl),
+                            title: Text(
+                              nombre,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            subtitle: Text(
+                              [
+                                if (marca.isNotEmpty) marca,
+                                if (vol > 0) '${vol}ml',
+                                if (cat.isNotEmpty) cat,
+                              ].join(' • '),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            trailing: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                if (promo)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.pink.withOpacity(.12),
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                    child: Text(
+                                      '\$ $promoPrecio',
+                                      style: const TextStyle(
+                                        color: Colors.pink,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  )
+                                else
+                                  Text(
+                                    '\$ $precio',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                if (!activo)
+                                  Text(
+                                    'inactiva',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: cs.error,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            onLongPress: (kIsAdmin || isAdmin)
+                                ? () => _editarBebida(id, m)
+                                : null,
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
               ),
             ],
           ),
-        ) ??
-        false;
+          floatingActionButton:
+              (kIsAdmin || isAdmin) ? _FabNuevo(onTap: _nuevaBebida) : null,
+        );
+      },
+    );
+  }
+}
+
+// ---------- widgets auxiliares ----------
+
+// NUEVO: pill con icono y estado seleccionado
+class _Pill extends StatelessWidget {
+  const _Pill({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.tint,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  final Color? tint;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final bg = selected
+        ? (tint ?? cs.primary).withOpacity(.18)
+        : cs.surfaceVariant.withOpacity(.45);
+    final fg = selected ? (tint ?? cs.primary) : cs.onSurfaceVariant;
+
+    return Material(
+      color: bg,
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 18, color: fg),
+              const SizedBox(width: 8),
+              Text(label,
+                  style: TextStyle(
+                    color: fg,
+                    fontWeight: FontWeight.w600,
+                  )),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FabNuevo extends StatelessWidget {
+  const _FabNuevo({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return FloatingActionButton.extended(
+      onPressed: onTap,
+      icon: const Icon(Icons.local_drink_outlined),
+      label: const Text('Nueva bebida'),
+    );
+  }
+}
+
+class _Thumb extends StatelessWidget {
+  const _Thumb({this.url});
+  final String? url;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: SizedBox(
+        width: 56,
+        height: 56,
+        child: (url == null || url!.isEmpty)
+            ? Container(
+                color: cs.surfaceVariant.withOpacity(.5),
+                child: Icon(Icons.local_drink, color: cs.onSurfaceVariant),
+              )
+            : Image.network(url!, fit: BoxFit.cover),
+      ),
+    );
   }
 }

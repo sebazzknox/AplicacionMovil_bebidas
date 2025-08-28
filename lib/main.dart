@@ -47,16 +47,13 @@ class MyApp extends StatelessWidget {
         appBarTheme: const AppBarTheme(
           centerTitle: true,
           elevation: 2,
-          // si tu SDK lo permite, después podemos volver a agregar shape
         ),
 
-        // <- aquí el cambio: CardThemeData en lugar de CardTheme
         cardTheme: CardThemeData(
           elevation: 3,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
-          // si tu SDK lo soporta, luego podemos sumar: margin: EdgeInsets.symmetric(horizontal: 12, vertical: 8)
         ),
 
         chipTheme: ChipThemeData(
@@ -76,11 +73,46 @@ class MyApp extends StatelessWidget {
         ),
       ),
 
-      // Inicio
+      // Pantalla de inicio
       home: const SplashScreen(),
+
+      // Rutas nombradas simples (dejamos fuera '/bebidas' para manejarla en onGenerateRoute)
       routes: {
         '/comercios': (_) => const ComerciosPage(),
-        '/bebidas': (_) => const BebidasPage(),
+      },
+
+      // Construcción dinámica de rutas que necesitan argumentos
+      onGenerateRoute: (settings) {
+        if (settings.name == '/bebidas') {
+          final args = (settings.arguments as Map?) ?? {};
+          // Admitimos claves 'comercioId' o 'initialComercioId', y el nombre opcional
+          final comercioId =
+              (args['comercioId'] ?? args['initialComercioId']) as String?;
+          final comercioNombre =
+              (args['comercioNombre'] ?? args['initialComercioNombre'] ?? '') as String;
+
+          if (comercioId == null || comercioId.isEmpty) {
+            // Fallback legible si alguien navega sin argumentos
+            return MaterialPageRoute(
+              builder: (_) => Scaffold(
+                appBar: AppBar(title: const Text('Bebidas')),
+                body: const Center(
+                  child: Text('Falta el comercioId para abrir Bebidas'),
+                ),
+              ),
+            );
+          }
+
+          return MaterialPageRoute(
+            builder: (_) => BebidasPage(
+              initialComercioId: comercioId,
+              initialComercioNombre: comercioNombre,
+            ),
+          );
+        }
+
+        // Dejar que otras rutas (si las agregás en el futuro) se resuelvan por defecto
+        return null;
       },
     );
   }

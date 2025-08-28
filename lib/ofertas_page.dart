@@ -96,7 +96,9 @@ class _OfertasPageState extends State<OfertasPage> {
                   final comercioId = data['comercioId'] as String?;
                   if (_soloActivas && !activa) return false;
                   if ((_filtroComercioId?.isNotEmpty ?? false) &&
-                      comercioId != _filtroComercioId) return false;
+                      comercioId != _filtroComercioId) {
+                    return false;
+                  }
                   return true;
                 }).toList();
 
@@ -481,7 +483,7 @@ class _OfertasPageState extends State<OfertasPage> {
 
     try {
       if (isEdit) {
-        await doc!.reference.update(payload);
+        await doc.reference.update(payload);
 
         if (_fotoTmp != null) {
           await _deleteFotoByPath(data?['fotoPath'] as String?);
