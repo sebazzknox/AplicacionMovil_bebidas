@@ -33,6 +33,9 @@
         android:label="bebidas_app"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        
+    
+
 
         <activity
             android:name=".MainActivity"
@@ -48,10 +51,7 @@
                 android:name="io.flutter.embedding.android.NormalTheme"
                 android:resource="@style/NormalTheme" />
 
-            <!-- API Key de Google Maps -->
-            <meta-data
-                android:name="com.google.android.geo.API_KEY"
-                android:value="YOUR_API_KEY_HERE" />
+           
 
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>

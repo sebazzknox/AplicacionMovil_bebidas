@@ -1,12 +1,31 @@
+// comercio_detalle_page.dart
+import 'dart:io';
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
+// ===== Cloudinary (subida de imagen unsigned con preset) =====
+import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
+
+// ===== Ubicación sencilla =====
+import 'package:geolocator/geolocator.dart';
+import 'package:geocoding/geocoding.dart' as gc;
+
 import 'bebidas_page.dart';
 import 'stock_page.dart';
 import 'comercios_page.dart' show kIsAdmin;
+
+/// ----------------------------------------------------------------
+/// CONFIG CLOUDINARY (completá con los tuyos reales)
+/// ----------------------------------------------------------------
+const String _CLOUDINARY_CLOUD_NAME = 'dlk7onebj';      // p.ej: dx7onebj
+const String _CLOUDINARY_UPLOAD_PRESET = 'mi_default'; // p.ej: ml_default
+/// ----------------------------------------------------------------
 
 /// ===================== Helpers generales =====================
 Map<String, dynamic>? asMapDynamic(Object? v) {
@@ -41,17 +60,123 @@ String _diaHoyShort() {
 }
 
 /// ===================== Página =====================
-class ComercioDetallePage extends StatelessWidget {
+class ComercioDetallePage extends StatefulWidget {
   final String comercioId;
   const ComercioDetallePage({super.key, required this.comercioId});
 
   @override
-  Widget build(BuildContext context) {
-    final docRef =
-        FirebaseFirestore.instance.collection('comercios').doc(comercioId);
+  State<ComercioDetallePage> createState() => _ComercioDetallePageState();
+}
 
+class _ComercioDetallePageState extends State<ComercioDetallePage> {
+  DocumentReference<Map<String, dynamic>> get _docRef =>
+      FirebaseFirestore.instance.collection('comercios').doc(widget.comercioId);
+
+  // ---------- Helpers de ubicación ----------
+  Future<bool> _ensurePermisosLocation() async {
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) return false;
+    var perm = await Geolocator.checkPermission();
+    if (perm == LocationPermission.denied) {
+      perm = await Geolocator.requestPermission();
+    }
+    return perm == LocationPermission.always ||
+        perm == LocationPermission.whileInUse;
+  }
+
+  Future<Position?> _posicionActual() async {
+    if (!await _ensurePermisosLocation()) return null;
+    return Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+  }
+
+  Future<gc.Location?> _geocodeDireccion({
+    required String direccion,
+    required String ciudad,
+    required String provincia,
+  }) async {
+    final q = [direccion, ciudad, provincia]
+        .where((e) => e.trim().isNotEmpty)
+        .join(', ');
+    if (q.isEmpty) return null;
+    try {
+      final res = await gc.locationFromAddress(q);
+      if (res.isEmpty) return null;
+      return res.first;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // ---------- Cambiar portada (Cloudinary unsigned) ----------
+  Future<void> _cambiarPortada() async {
+    try {
+      final picked = await ImagePicker()
+          .pickImage(source: ImageSource.gallery, imageQuality: 85);
+      if (picked == null) return;
+
+      if (_CLOUDINARY_CLOUD_NAME.isEmpty || _CLOUDINARY_UPLOAD_PRESET.isEmpty) {
+        throw Exception('Cloudinary no configurado');
+      }
+
+      final uri = Uri.parse(
+          'https://api.cloudinary.com/v1_1/$_CLOUDINARY_CLOUD_NAME/image/upload');
+
+      final req = http.MultipartRequest('POST', uri)
+        ..fields['upload_preset'] = _CLOUDINARY_UPLOAD_PRESET
+        ..files.add(await http.MultipartFile.fromPath('file', picked.path));
+
+      final res = await req.send();
+      final body = await res.stream.bytesToString();
+
+      if (res.statusCode != 200 && res.statusCode != 201) {
+        throw Exception('Cloudinary error ${res.statusCode}: $body');
+      }
+
+      final json = jsonDecode(body) as Map<String, dynamic>;
+      final url = (json['secure_url'] ?? json['url'])?.toString();
+      if (url == null || url.isEmpty) {
+        throw Exception('Respuesta sin URL de imagen');
+      }
+
+      await _docRef
+          .update({'fotoUrl': url, 'updatedAt': FieldValue.serverTimestamp()});
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Portada actualizada')));
+      setState(() {});
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error al subir imagen: $e')),
+      );
+    }
+  }
+
+  // ---------- Borrar portada (solo quita la URL de Firestore) ----------
+  Future<void> _borrarPortada() async {
+    try {
+      await _docRef.update({
+        'fotoUrl': FieldValue.delete(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Portada eliminada')),
+      );
+      setState(() {});
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo eliminar: $e')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: docRef.snapshots(),
+      stream: _docRef.snapshots(),
       builder: (context, snap) {
         if (!snap.hasData) {
           return const Scaffold(
@@ -101,13 +226,49 @@ class ComercioDetallePage extends StatelessWidget {
           appBar: AppBar(
             title: Text(nombre.isEmpty ? 'Comercio' : nombre),
             actions: [
+              if (kIsAdmin) ...[
+                IconButton(
+                  tooltip: 'Cambiar portada',
+                  icon: const Icon(Icons.photo_library_outlined),
+                  onPressed: _cambiarPortada,
+                ),
+                IconButton(
+                  tooltip: 'Borrar portada',
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: (fotoUrl == null || fotoUrl.isEmpty)
+                      ? null
+                      : () async {
+                          final ok = await showDialog<bool>(
+                                context: context,
+                                builder: (_) => AlertDialog(
+                                  title: const Text('Eliminar portada'),
+                                  content: const Text(
+                                      'Esto quitará la imagen del comercio (no borra el archivo en Cloudinary). ¿Continuar?'),
+                                  actions: [
+                                    TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(context, false),
+                                        child: const Text('Cancelar')),
+                                    FilledButton(
+                                        onPressed: () =>
+                                            Navigator.pop(context, true),
+                                        child: const Text('Eliminar')),
+                                  ],
+                                ),
+                              ) ??
+                              false;
+                          if (ok) await _borrarPortada();
+                        },
+                ),
+              ],
               IconButton(
                 tooltip: 'Compartir',
                 icon: const Icon(Icons.share_outlined),
                 onPressed: () {
                   final partes = <String>[];
-                  partes.add(
-                      nombre.isEmpty ? 'Mirá este comercio 👇' : 'Mirá "$nombre" 👇');
+                  partes.add(nombre.isEmpty
+                      ? 'Mirá este comercio 👇'
+                      : 'Mirá "$nombre" 👇');
                   if (direccion != null && direccion.isNotEmpty) {
                     partes.add('📍 $direccion');
                   }
@@ -116,9 +277,15 @@ class ComercioDetallePage extends StatelessWidget {
                     if (provincia != null && provincia.isNotEmpty) provincia,
                   ].join(', ');
                   if (loc.isNotEmpty) partes.add('🏙️ $loc');
-                  if (telefono != null && telefono.isNotEmpty) partes.add('📞 $telefono');
-                  if (instagram != null && instagram.isNotEmpty) partes.add('📸 $instagram');
-                  if (facebook != null && facebook.isNotEmpty) partes.add('📘 $facebook');
+                  if (telefono != null && telefono.isNotEmpty) {
+                    partes.add('📞 $telefono');
+                  }
+                  if (instagram != null && instagram.isNotEmpty) {
+                    partes.add('📸 $instagram');
+                  }
+                  if (facebook != null && facebook.isNotEmpty) {
+                    partes.add('📘 $facebook');
+                  }
                   partes.add('\nDescargá la app y encontrá más bebidas cerca 🍻');
                   Share.share(partes.join('\n'));
                 },
@@ -127,7 +294,7 @@ class ComercioDetallePage extends StatelessWidget {
                 IconButton(
                   tooltip: 'Editar comercio',
                   icon: const Icon(Icons.edit_outlined),
-                  onPressed: () => _editarComercio(context, docRef, data),
+                  onPressed: () => _editarComercio(context, _docRef, data),
                 ),
             ],
           ),
@@ -141,7 +308,7 @@ class ComercioDetallePage extends StatelessWidget {
 
               _HorariosRow(
                 horarios: horarios,
-                onVerMas: () => _showHorariosSheet(context, horarios, docRef),
+                onVerMas: () => _showHorariosSheet(context, horarios, _docRef),
               ),
               const SizedBox(height: 10),
 
@@ -168,7 +335,6 @@ class ComercioDetallePage extends StatelessWidget {
               if (direccion != null && direccion.isNotEmpty)
                 const SizedBox(height: 8),
 
-              /// -------- Acciones rápidas --------
               _ActionsGrid(
                 telefono: telefono,
                 direccion: direccion,
@@ -181,7 +347,6 @@ class ComercioDetallePage extends StatelessWidget {
 
               const SizedBox(height: 26),
 
-              /// -------- CTAs principales --------
               FilledButton.icon(
                 icon: const Icon(Icons.local_drink_outlined),
                 label: const Text('Ver bebidas'),
@@ -190,7 +355,7 @@ class ComercioDetallePage extends StatelessWidget {
                     context,
                     MaterialPageRoute(
                       builder: (_) => BebidasPage(
-                        initialComercioId: comercioId,
+                        initialComercioId: widget.comercioId,
                         initialComercioNombre: nombre,
                       ),
                     ),
@@ -206,7 +371,7 @@ class ComercioDetallePage extends StatelessWidget {
                     context,
                     MaterialPageRoute(
                       builder: (_) => StockPage(
-                        comercioId: comercioId,
+                        comercioId: widget.comercioId,
                         comercioNombre: nombre,
                       ),
                     ),
@@ -234,7 +399,7 @@ class ComercioDetallePage extends StatelessWidget {
   }
 
   /// ------- Helpers -------
-  static Future<void> _launchUri(Uri uri) async {
+  Future<void> _launchUri(Uri uri) async {
     await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
@@ -257,10 +422,43 @@ class ComercioDetallePage extends StatelessWidget {
         TextEditingController(text: (data['instagram'] ?? '').toString());
     final facebookCtrl =
         TextEditingController(text: (data['facebook'] ?? '').toString());
-    final latCtrl = TextEditingController(
-        text: (data['lat'] == null) ? '' : data['lat'].toString());
-    final lngCtrl = TextEditingController(
-        text: (data['lng'] == null) ? '' : data['lng'].toString());
+
+    double? lat = (data['lat'] as num?)?.toDouble();
+    double? lng = (data['lng'] as num?)?.toDouble();
+
+    Future<void> setDesdeActual() async {
+      final p = await _posicionActual();
+      if (p == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No se pudo obtener la ubicación')),
+          );
+        }
+        return;
+      }
+      lat = p.latitude;
+      lng = p.longitude;
+      if (mounted) setState(() {});
+    }
+
+    Future<void> setDesdeDireccion() async {
+      final loc = await _geocodeDireccion(
+        direccion: direccionCtrl.text,
+        ciudad: ciudadCtrl.text,
+        provincia: provinciaCtrl.text,
+      );
+      if (loc == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No se encontró esa dirección')),
+          );
+        }
+        return;
+      }
+      lat = loc.latitude;
+      lng = loc.longitude;
+      if (mounted) setState(() {});
+    }
 
     final ok = await showDialog<bool>(
           context: context,
@@ -278,30 +476,39 @@ class ComercioDetallePage extends StatelessWidget {
                       keyboard: TextInputType.phone),
                   _tf(instagramCtrl, 'Instagram', Icons.camera_alt_outlined),
                   _tf(facebookCtrl, 'Facebook', Icons.facebook_outlined),
+                  const SizedBox(height: 12),
                   Row(
                     children: [
                       Expanded(
-                        child: _tf(
-                          latCtrl,
-                          'Lat',
-                          Icons.my_location,
-                          keyboard: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: _tf(
-                          lngCtrl,
-                          'Lng',
-                          Icons.my_location_outlined,
-                          keyboard: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
+                        child: OutlinedButton.icon(
+                          onPressed: setDesdeActual,
+                          icon: const Icon(Icons.my_location),
+                          label: const Text('Usar mi ubicación'),
                         ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: setDesdeDireccion,
+                          icon: const Icon(Icons.search),
+                          label: const Text('Buscar por dirección'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      (lat != null && lng != null)
+                          ? 'Coord: ${lat!.toStringAsFixed(5)}, ${lng!.toStringAsFixed(5)}'
+                          : 'Coord: (sin definir)',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
                   ),
                 ],
               ),
@@ -330,16 +537,16 @@ class ComercioDetallePage extends StatelessWidget {
       'telefono': telefonoCtrl.text.trim(),
       'instagram': instagramCtrl.text.trim(),
       'facebook': facebookCtrl.text.trim(),
-      'lat': double.tryParse(latCtrl.text.trim()),
-      'lng': double.tryParse(lngCtrl.text.trim()),
+      if (lat != null && lng != null) 'lat': lat,
+      if (lat != null && lng != null) 'lng': lng,
       'updatedAt': FieldValue.serverTimestamp(),
     });
-    // ignore: use_build_context_synchronously
+    if (!mounted) return;
     ScaffoldMessenger.of(context)
         .showSnackBar(const SnackBar(content: Text('Cambios guardados')));
   }
 
-  static Widget _tf(
+  Widget _tf(
     TextEditingController c,
     String label,
     IconData icon, {
@@ -570,7 +777,7 @@ class _ActionsGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final w = MediaQuery.of(context).size.width;
-    final twoCols = w >= 360; // simple rwd
+    final twoCols = w >= 360;
 
     final children = <Widget>[
       if (telefono != null && telefono!.isNotEmpty)
@@ -682,7 +889,6 @@ class _HorariosRow extends StatelessWidget {
       rangoHoy = (d.isNotEmpty && a.isNotEmpty) ? '${_fmt(d)} – ${_fmt(a)}' : '';
     }
 
-    // ¿Está abierto ahora?
     bool abierto = false;
     if (rangoHoy.contains('–')) {
       final parts = rangoHoy.split('–');
@@ -691,7 +897,7 @@ class _HorariosRow extends StatelessWidget {
         final segs = s.trim().split(':');
         if (segs.length < 2) return null;
         return TimeOfDay(hour: int.tryParse(segs[0]) ?? 0, minute: int.tryParse(segs[1]) ?? 0);
-        }
+      }
       final d = parse(parts[0]);
       final a = parse(parts[1]);
       if (d != null && a != null) {
@@ -701,7 +907,6 @@ class _HorariosRow extends StatelessWidget {
       }
     }
 
-    // Texto a mostrar
     String displayText;
     if (rangoHoy.isNotEmpty) {
       displayText = rangoHoy;
@@ -800,7 +1005,6 @@ void _showHorariosSheet(
     backgroundColor: cs.surface,
     isScrollControlled: true,
     builder: (ctx) {
-      // estado local del sheet
       final List<Map<String, dynamic>> local = List<Map<String, dynamic>>.from(items);
 
       return StatefulBuilder(

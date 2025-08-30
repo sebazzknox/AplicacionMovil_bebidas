@@ -2,12 +2,40 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart'; // 👈 NUEVO: auth para login anónimo
+import 'widgets/social_follow_card.dart'; // ruta según tu proyecto
 
 import 'comercios_page.dart';
 import 'ofertas_page.dart';
 import 'comercios_page.dart' as cp;
 import 'admin_state.dart';
 import 'admin_panel_page.dart';
+
+
+class HomePage extends StatelessWidget {
+  const HomePage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Inicio')),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        children: [
+          // … tu contenido de siempre (banners, buscador, categorías, etc.)
+
+          const SizedBox(height: 16),
+          SocialFollowCard(
+            facebookUrl: 'https://www.facebook.com/share/17JKBaM6Rs/',
+            instagramUrl: 'https://www.instagram.com/descabiooficial?igsh=MWVqdDByamI0Z2JnOQ==',
+            // title: 'Seguinos y enterate de promos 🔔', // opcional
+          ),
+
+          // … más secciones si querés
+        ],
+      ),
+    );
+  }
+}
 
 // PIN de administrador (podés cambiarlo cuando quieras)
 const String kAdminPin = '1234';
@@ -124,6 +152,7 @@ class HomeLandingPage extends StatelessWidget {
               ),
             ),
           ),
+          
 
           // -------- CONTENIDO ORIGINAL --------
           SliverToBoxAdapter(
@@ -207,6 +236,20 @@ class HomeLandingPage extends StatelessWidget {
                       );
                     },
                   ),
+
+                  // ... dentro del SliverToBoxAdapter del contenido original,
+// justo ANTES del Center( child: TextButton.icon(... "Soy administrador") )
+
+const SizedBox(height: 24),
+
+SocialFollowCard(
+  title: 'Seguinos en redes sociales',
+  facebookUrl: 'https://www.facebook.com/share/17JKBaM6Rs/',
+  instagramUrl: 'https://www.instagram.com/descabiooficial?igsh=MWVqdDByamI0Z2JnOQ==',
+  tiktokUrl: ''
+),
+
+const SizedBox(height: 24),
 
                   Center(
                     child: TextButton.icon(
