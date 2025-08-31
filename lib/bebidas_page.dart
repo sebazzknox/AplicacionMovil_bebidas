@@ -8,7 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import 'admin_state.dart'; // adminMode (ValueNotifier<bool>)
-import 'comercios_page.dart' show kIsAdmin;
+import 'comercios_page.dart' show ComerciosPage;
 
 class BebidasPage extends StatefulWidget {
   const BebidasPage({

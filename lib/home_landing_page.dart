@@ -1,15 +1,14 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // 👈 NUEVO: auth para login anónimo
-import 'widgets/social_follow_card.dart'; // ruta según tu proyecto
+import 'package:firebase_auth/firebase_auth.dart';
 
-import 'comercios_page.dart';
-import 'ofertas_page.dart';
-import 'comercios_page.dart' as cp;
-import 'admin_state.dart';
+import 'widgets/social_links_card.dart';
+import 'comercios_page.dart' show ComerciosPage;      // ⬅️ solo la clase, no trae kIsAdmin
+import 'ofertas_page.dart' show OfertasPage;
+import 'admin_state.dart';                            // ⬅️ define adminMode y kIsAdmin globales
 import 'admin_panel_page.dart';
-
+import 'services/analytics_service.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
@@ -20,17 +19,8 @@ class HomePage extends StatelessWidget {
       appBar: AppBar(title: const Text('Inicio')),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-        children: [
-          // … tu contenido de siempre (banners, buscador, categorías, etc.)
-
-          const SizedBox(height: 16),
-          SocialFollowCard(
-            facebookUrl: 'https://www.facebook.com/share/17JKBaM6Rs/',
-            instagramUrl: 'https://www.instagram.com/descabiooficial?igsh=MWVqdDByamI0Z2JnOQ==',
-            // title: 'Seguinos y enterate de promos 🔔', // opcional
-          ),
-
-          // … más secciones si querés
+        children: const [
+          SizedBox(height: 16),
         ],
       ),
     );
@@ -40,18 +30,14 @@ class HomePage extends StatelessWidget {
 // PIN de administrador (podés cambiarlo cuando quieras)
 const String kAdminPin = '1234';
 
-/// 👇 NUEVO: asegura sesión y asigna rol admin en Firestore
+/// Asegura sesión y asigna rol admin en Firestore
 Future<void> ensureSignedInAndPromoteToAdmin() async {
   final auth = FirebaseAuth.instance;
-
-  // si no hay usuario, crea sesión anónima
   if (auth.currentUser == null) {
     await auth.signInAnonymously();
   }
-
   final uid = auth.currentUser!.uid;
 
-  // setea/mergea rol 'admin' en users/{uid}
   await FirebaseFirestore.instance.collection('users').doc(uid).set(
     {
       'role': 'admin',
@@ -61,8 +47,21 @@ Future<void> ensureSignedInAndPromoteToAdmin() async {
   );
 }
 
-class HomeLandingPage extends StatelessWidget {
+/// ====================== HOME LANDING ======================
+class HomeLandingPage extends StatefulWidget {
   const HomeLandingPage({super.key});
+
+  @override
+  State<HomeLandingPage> createState() => _HomeLandingPageState();
+}
+
+class _HomeLandingPageState extends State<HomeLandingPage> {
+  @override
+  void initState() {
+    super.initState();
+    // registra apertura de la app
+    AppAnalytics.appOpen();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -96,7 +95,8 @@ class HomeLandingPage extends StatelessWidget {
                 return Padding(
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     decoration: BoxDecoration(
                       color: cs.primary,
                       borderRadius: BorderRadius.circular(14),
@@ -118,13 +118,15 @@ class HomeLandingPage extends StatelessWidget {
                           style: TextButton.styleFrom(
                             foregroundColor: Colors.white,
                             backgroundColor: Colors.white.withOpacity(.18),
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 6),
                           ),
                           onPressed: () {
                             adminMode.value = false;
-                            cp.kIsAdmin = false;
+                            kIsAdmin = false;
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Modo admin desactivado')),
+                              const SnackBar(
+                                  content: Text('Modo admin desactivado')),
                             );
                           },
                           icon: const Icon(Icons.logout, size: 18),
@@ -147,12 +149,12 @@ class HomeLandingPage extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
               child: _PromoChipsRow(
                 onTapChip: (context) {
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => const OfertasPage()));
+                  Navigator.push(context,
+                      MaterialPageRoute(builder: (_) => const OfertasPage()));
                 },
               ),
             ),
           ),
-          
 
           // -------- CONTENIDO ORIGINAL --------
           SliverToBoxAdapter(
@@ -228,7 +230,8 @@ class HomeLandingPage extends StatelessWidget {
                             subtitle: 'Comercios · Ofertas · Stock · Finanzas',
                             onTap: () => Navigator.push(
                               context,
-                              MaterialPageRoute(builder: (_) => const AdminPanelPage()),
+                              MaterialPageRoute(
+                                  builder: (_) => const AdminPanelPage()),
                             ),
                           ),
                           const SizedBox(height: 24),
@@ -237,19 +240,17 @@ class HomeLandingPage extends StatelessWidget {
                     },
                   ),
 
-                  // ... dentro del SliverToBoxAdapter del contenido original,
-// justo ANTES del Center( child: TextButton.icon(... "Soy administrador") )
-
-const SizedBox(height: 24),
-
-SocialFollowCard(
-  title: 'Seguinos en redes sociales',
+                  // ---- Redes sociales
+                  const SizedBox(height: 16),
+Text(
+  'Seguinos en redes sociales',
+  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+),
+const SocialLinksCard(
   facebookUrl: 'https://www.facebook.com/share/17JKBaM6Rs/',
   instagramUrl: 'https://www.instagram.com/descabiooficial?igsh=MWVqdDByamI0Z2JnOQ==',
-  tiktokUrl: ''
-),
-
-const SizedBox(height: 24),
+  tiktokUrl: 'https://www.tiktok.com/@tu_usuario_tiktok',
+ ),
 
                   Center(
                     child: TextButton.icon(
@@ -267,9 +268,9 @@ const SizedBox(height: 24),
     );
   }
 
-  // ========= LOGIN ADMIN por PIN (ACTUALIZADO) =========
+  // ========= LOGIN ADMIN por PIN =========
   void _showAdminLogin(BuildContext context) {
-    if (adminMode.value == true || cp.kIsAdmin) {
+    if (adminMode.value == true || kIsAdmin) {
       showModalBottomSheet(
         context: context,
         builder: (ctx) => SafeArea(
@@ -286,7 +287,7 @@ const SizedBox(height: 24),
                 title: const Text('Salir de administrador'),
                 onTap: () {
                   adminMode.value = false;
-                  cp.kIsAdmin = false;
+                  kIsAdmin = false;
                   Navigator.pop(ctx);
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Modo admin desactivado')),
@@ -300,7 +301,6 @@ const SizedBox(height: 24),
       return;
     }
 
-    // Si no está logueado como admin, pedimos PIN
     final pinCtrl = TextEditingController();
     showDialog(
       context: context,
@@ -322,14 +322,10 @@ const SizedBox(height: 24),
           FilledButton(
             onPressed: () async {
               final pin = pinCtrl.text.trim();
-
               if (pin == kAdminPin) {
-                // 👇 Loguea anónimo (si hace falta) y asigna rol admin
                 await ensureSignedInAndPromoteToAdmin();
-
                 adminMode.value = true;
-                cp.kIsAdmin = true;
-
+                kIsAdmin = true;
                 if (ctx.mounted) Navigator.pop(ctx);
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -350,58 +346,7 @@ const SizedBox(height: 24),
   }
 }
 
-class _ActionCard extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final VoidCallback onTap;
-
-  const _ActionCard({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Material(
-      color: cs.surfaceContainerHighest.withOpacity(.6),
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              CircleAvatar(
-                radius: 26,
-                backgroundColor: cs.primaryContainer,
-                child: Icon(icon, color: cs.onPrimaryContainer),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title, style: Theme.of(context).textTheme.titleMedium),
-                    const SizedBox(height: 4),
-                    Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
-                  ],
-                ),
-              ),
-              const Icon(Icons.chevron_right),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// ===== Banner publicitario PRO (carrusel local + fade + indicadores) =====
+/// ===== Banner publicitario (carrusel) =====
 class _HomePromoBanner extends StatefulWidget {
   const _HomePromoBanner();
 
@@ -508,7 +453,8 @@ class _HomePromoBannerState extends State<_HomePromoBanner> {
                       borderRadius: BorderRadius.circular(999),
                     ),
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: List.generate(
@@ -615,6 +561,59 @@ class _PromoChip extends StatelessWidget {
               Icon(icon, size: 18, color: onColor),
               const SizedBox(width: 6),
               Text(label, style: TextStyle(color: onColor)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ActionCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  const _ActionCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Material(
+      color: cs.surfaceContainerHighest.withOpacity(.6),
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 26,
+                backgroundColor: cs.primaryContainer,
+                child: Icon(icon, color: cs.onPrimaryContainer),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 4),
+                    Text(subtitle,
+                        style: Theme.of(context).textTheme.bodySmall),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right),
             ],
           ),
         ),

@@ -2,9 +2,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
-import 'admin_state.dart';
-import 'comercios_page.dart';
-import 'ofertas_page.dart';
+import 'admin_state.dart';               // adminMode y kIsAdmin (globales)
+import 'admin_stats_page.dart';
+import 'comercios_page.dart' show ComerciosPage;  // ⬅️ solo trae la página
+import 'ofertas_page.dart' show OfertasPage;
 import 'stock_page.dart';
 import 'finanzas_page.dart';
 
@@ -26,14 +27,12 @@ class AdminPanelPage extends StatelessWidget {
               icon: Icon(isOn ? Icons.lock_open : Icons.lock_outline),
               onPressed: () {
                 adminMode.value = !isOn;
-                // sincronizamos con kIsAdmin usado en otras pantallas
-                // ignore: invalid_use_of_visible_for_testing_member, invalid_use_of_protected_member
-                // (kIsAdmin es const en tu file original; si lo hiciste mutable, se actualiza)
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text(isOn
-                        ? 'Modo admin desactivado'
-                        : 'Modo admin activado'),
+                    content: Text(
+                      isOn ? 'Modo admin desactivado'
+                           : 'Modo admin activado',
+                    ),
                   ),
                 );
               },
@@ -45,7 +44,8 @@ class AdminPanelPage extends StatelessWidget {
       body: Column(
         children: [
           const SizedBox(height: 8),
-          // Avizo de estado admin
+
+          // Aviso de estado admin
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: ValueListenableBuilder<bool>(
@@ -53,8 +53,7 @@ class AdminPanelPage extends StatelessWidget {
               builder: (_, isOn, __) => Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: (isOn ? Colors.green : Colors.orange)
-                      .withOpacity(.12),
+                  color: (isOn ? Colors.green : Colors.orange).withOpacity(.12),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Row(
@@ -113,7 +112,6 @@ class AdminPanelPage extends StatelessWidget {
                   onTap: (ctx) async {
                     final picked = await _pickComercio(ctx);
                     if (picked == null) return;
-                    // navego al stock del comercio elegido
                     // ignore: use_build_context_synchronously
                     Navigator.push(
                       ctx,
@@ -136,7 +134,19 @@ class AdminPanelPage extends StatelessWidget {
                     MaterialPageRoute(builder: (_) => const FinanzasPage()),
                   ),
                 ),
+                // 👉 Nuevo tile: Estadísticas
+                _AdminTile(
+                  icon: Icons.analytics_outlined,
+                  title: 'Estadísticas',
+                  subtitle: 'Entradas, interacciones y vistas',
+                  enabled: kIsAdmin,
+                  onTap: (ctx) => Navigator.push(
+                    ctx,
+                    MaterialPageRoute(builder: (_) => const AdminStatsPage()),
+                  ),
+                ),
               ],
+        
             ),
           ),
         ],
@@ -152,7 +162,7 @@ class AdminPanelPage extends StatelessWidget {
     );
   }
 
-  // ---------- Accesos rápidos opcionales ----------
+  // ---------- Accesos rápidos ----------
   void _showQuickActions(BuildContext context) {
     showModalBottomSheet(
       context: context,
@@ -190,7 +200,7 @@ class AdminPanelPage extends StatelessWidget {
     );
   }
 
-  // ---------- Selector de comercio para el módulo Stock ----------
+  // ---------- Selector de comercio para Stock ----------
   Future<Map<String, String>?> _pickComercio(BuildContext parentCtx) async {
     return await showModalBottomSheet<Map<String, String>>(
       context: parentCtx,
@@ -224,10 +234,12 @@ class AdminPanelPage extends StatelessWidget {
                           final data = d.data();
                           final nombre = (data['nombre'] ?? '') as String;
                           final ciudad = (data['ciudad'] ?? '') as String?;
-                          final provincia = (data['provincia'] ?? '') as String?;
+                          final provincia =
+                              (data['provincia'] ?? '') as String?;
                           final subt = [
                             if (ciudad != null && ciudad.isNotEmpty) ciudad,
-                            if (provincia != null && provincia.isNotEmpty) provincia,
+                            if (provincia != null && provincia.isNotEmpty)
+                              provincia,
                           ].join(' • ');
                           return ListTile(
                             leading: const Icon(Icons.storefront),
@@ -292,7 +304,7 @@ class _AdminTile extends StatelessWidget {
           children: [
             CircleAvatar(
               backgroundColor:
-                  (enabled ? cs.primaryContainer : cs.surfaceContainerHighest),
+                  enabled ? cs.primaryContainer : cs.surfaceContainerHighest,
               child: Icon(
                 icon,
                 color: enabled ? cs.onPrimaryContainer : cs.outline,
@@ -319,7 +331,7 @@ class _AdminTile extends StatelessWidget {
                 Icons.chevron_right,
                 color: enabled ? cs.primary : cs.outlineVariant,
               ),
-            )
+            ),
           ],
         ),
       ),
