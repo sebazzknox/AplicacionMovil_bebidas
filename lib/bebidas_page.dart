@@ -386,7 +386,7 @@ class _BebidasPageState extends State<BebidasPage> {
       await col.doc(editId).update(payload);
       if (_fotoTmp != null) {
         await _deleteFotoByPath(data?['fotoPath'] as String?);
-        final up = await _uploadFoto(widget.initialComercioId, editId!);
+        final up = await _uploadFoto(widget.initialComercioId, editId);
         if (up != null) {
           await col.doc(editId).update(
             {'fotoUrl': up.url, 'fotoPath': up.path},

@@ -12,6 +12,8 @@ import 'services/analytics_service.dart';
 import 'dart:ui';
 import 'package:google_fonts/google_fonts.dart';
 import 'promos_destacadas.dart';
+import 'widgets/animated_filter_chips.dart';
+import 'widgets/promo_ticker.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
@@ -210,6 +212,7 @@ return Scaffold(
               ),
             ),
           ),
+          
 
           // … por ejemplo después de los chips/promos
            const SliverToBoxAdapter(child: SizedBox(height: 8)),
@@ -562,33 +565,22 @@ class _PromoChipsRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
-          _PromoChip(
-            label: '2x1',
-            icon: Icons.local_drink_outlined,
-            color: cs.primaryContainer,
-            onTap: () => onTapChip(context),
-          ),
-          const SizedBox(width: 8),
-          _PromoChip(
-            label: 'Happy Hour',
-            icon: Icons.schedule_outlined,
-            color: cs.secondaryContainer,
-            onTap: () => onTapChip(context),
-          ),
-          const SizedBox(width: 8),
-          _PromoChip(
-            label: 'Envío gratis',
-            icon: Icons.local_shipping_outlined,
-            color: cs.tertiaryContainer,
-            onTap: () => onTapChip(context),
-          ),
-        ],
-      ),
-    );
+    return AnimatedFilterChips(
+  tags: const [
+    FilterTag(id: '2x1',   label: '2x1',          icon: Icons.local_drink_outlined),
+    FilterTag(id: 'happy', label: 'Happy Hour',   icon: Icons.schedule_outlined),
+    FilterTag(id: 'envio', label: 'Envío gratis', icon: Icons.local_shipping_outlined),
+  ],
+  onSelected: (tag) {
+    // seguís haciendo lo mismo que antes
+    onTapChip(context);
+
+    // si querés actuar distinto según el chip:
+    // if (tag.id == '2x1') { ... }
+    // else if (tag.id == 'happy') { ... }
+    // else if (tag.id == 'envio') { ... }
+  },
+);
   }
 }
 

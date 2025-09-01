@@ -166,6 +166,20 @@ class _OfertasPageState extends State<OfertasPage> {
                     final finTs  = (data['fin'] ?? data['hasta']) as Timestamp?;
                     final finStr =
                         finTs != null ? _fmtFecha(finTs.toDate()) : '—';
+                        // --- precios (acepta nombres alternativos) ---
+final double? precioOriginal =
+    (data['precioOriginal'] as num?)?.toDouble() ??
+    (data['precio'] as num?)?.toDouble();
+
+final double? precioOferta =
+    (data['precioOferta'] as num?)?.toDouble() ??
+    (data['promoPrecio'] as num?)?.toDouble();
+
+final double? descuento = (precioOriginal != null &&
+        precioOferta != null &&
+        precioOriginal > 0)
+    ? (1 - (precioOferta / precioOriginal)) * 100
+    : null;
 
                     return Material(
                       color: Theme.of(context).colorScheme.surface,
@@ -263,13 +277,76 @@ class _OfertasPageState extends State<OfertasPage> {
                                       ],
                                     ),
                                     const SizedBox(height: 4),
-                                    if (desc.isNotEmpty)
-                                      Text(
-                                        desc,
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
+                                    
                                     const SizedBox(height: 6),
+                                    // ... arriba venís de:
+const SizedBox(height: 4),
+if (desc.isNotEmpty)
+  Text(
+    desc,
+    maxLines: 2,
+    overflow: TextOverflow.ellipsis,
+  ),
+const SizedBox(height: 6),
+
+// (luego viene tu bloque de precios)
+const SizedBox(height: 6),
+
+// 🔽🔽🔽 PEGAR AQUÍ (@BLOQUE PRECIOS)
+if (precioOferta != null || precioOriginal != null) ...[
+  Row(
+    children: [
+      if (precioOferta != null)
+        Text(
+          '\$ ${precioOferta.toStringAsFixed(0)}',
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
+      if (precioOriginal != null && precioOferta != null) ...[
+        const SizedBox(width: 8),
+        Text(
+          '\$ ${precioOriginal.toStringAsFixed(0)}',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                decoration: TextDecoration.lineThrough,
+                color: Theme.of(context).colorScheme.outline,
+              ),
+        ),
+      ],
+      if (descuento != null) ...[
+        const SizedBox(width: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.primary.withOpacity(.12),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Text(
+            '-${descuento.round()}%',
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.primary,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
+    ],
+  ),
+  const SizedBox(height: 6),
+],
+// 🔼🔼🔼 HASTA AQUÍ
+
+// Tu fila existente se mantiene:
+Row(
+  children: [
+    Container(
+      // ... Activa/Finalizada ...
+    ),
+    const SizedBox(width: 8),
+    Text(
+      'Hasta $finStr',
+      style: Theme.of(context).textTheme.bodySmall,
+    ),
+  ],
+),
                                     Row(
                                       children: [
                                         Container(
@@ -285,9 +362,11 @@ class _OfertasPageState extends State<OfertasPage> {
                                                 BorderRadius.circular(999),
                                           ),
                                           child: Text(
+                                            
                                             activa
                                                 ? 'Activa'
                                                 : 'Finalizada',
+                                                
                                             style: Theme.of(context)
                                                 .textTheme
                                                 .labelSmall,
@@ -295,10 +374,12 @@ class _OfertasPageState extends State<OfertasPage> {
                                         ),
                                         const SizedBox(width: 8),
                                         Text(
+                                          
                                           'Hasta $finStr',
                                           style: Theme.of(context)
                                               .textTheme
                                               .bodySmall,
+                                              
                                         ),
                                       ],
                                     ),
@@ -317,6 +398,8 @@ class _OfertasPageState extends State<OfertasPage> {
           ),
         ],
       ),
+
+      
 
       floatingActionButton: kIsAdmin
           ? FloatingActionButton.extended(
@@ -343,7 +426,7 @@ class _OfertasPageState extends State<OfertasPage> {
         widget.filterComercioId;
     String? selectedComercioName;
 
-    if (selectedComercioId != null && selectedComercioId.isNotEmpty) {
+    if (selectedComercioId != null && selectedComercioId!.isNotEmpty) {
       try {
         final snap = await FirebaseFirestore.instance
             .collection('comercios')
