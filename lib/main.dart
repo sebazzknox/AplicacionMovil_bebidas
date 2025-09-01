@@ -3,10 +3,12 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'admin_new_promo_page.dart';
 
 import 'comercios_page.dart';
 import 'bebidas_page.dart';
 import 'splash_screen.dart';
+import 'theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -20,11 +22,18 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Lo mantenemos por si lo usás en otros lados
     final baseText = GoogleFonts.poppinsTextTheme();
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Bebidas App',
+
+      // 👇 Usa los temas centralizados de theme.dart (dejado como lo tenías)
+      // theme: buildLightTheme(),
+      // darkTheme: buildDarkTheme(),
+      themeMode: ThemeMode.system,
+      // theme: buildGraffitiTheme(),
 
       // Idioma
       locale: const Locale('es', 'AR'),
@@ -35,64 +44,26 @@ class MyApp extends StatelessWidget {
         GlobalCupertinoLocalizations.delegate,
       ],
 
-      // Tema
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.deepPurple,
-          brightness: Brightness.light,
-        ),
-        textTheme: baseText,
-
-        appBarTheme: const AppBarTheme(
-          centerTitle: true,
-          elevation: 2,
-        ),
-
-        cardTheme: CardThemeData(
-          elevation: 3,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-        ),
-
-        chipTheme: ChipThemeData(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          labelStyle: const TextStyle(fontWeight: FontWeight.w500),
-        ),
-
-        filledButtonTheme: FilledButtonThemeData(
-          style: FilledButton.styleFrom(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            textStyle: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-        ),
-      ),
-
       // Pantalla de inicio
       home: const SplashScreen(),
 
-      // Rutas nombradas simples (dejamos fuera '/bebidas' para manejarla en onGenerateRoute)
+      // Rutas nombradas simples
       routes: {
         '/comercios': (_) => const ComerciosPage(),
+        // 👇 Nueva ruta para crear/cargar una promo desde el admin
+        '/admin/nueva-promo': (_) => const AdminNewPromoPage(),
       },
 
       // Construcción dinámica de rutas que necesitan argumentos
       onGenerateRoute: (settings) {
         if (settings.name == '/bebidas') {
           final args = (settings.arguments as Map?) ?? {};
-          // Admitimos claves 'comercioId' o 'initialComercioId', y el nombre opcional
           final comercioId =
               (args['comercioId'] ?? args['initialComercioId']) as String?;
           final comercioNombre =
               (args['comercioNombre'] ?? args['initialComercioNombre'] ?? '') as String;
 
           if (comercioId == null || comercioId.isEmpty) {
-            // Fallback legible si alguien navega sin argumentos
             return MaterialPageRoute(
               builder: (_) => Scaffold(
                 appBar: AppBar(title: const Text('Bebidas')),

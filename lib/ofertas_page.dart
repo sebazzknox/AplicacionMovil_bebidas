@@ -12,7 +12,15 @@ import 'comercio_detalle_page.dart';
 import 'comercios_page.dart' show kIsAdmin; // flag admin
 
 class OfertasPage extends StatefulWidget {
-  const OfertasPage({super.key});
+  // Permite abrir la pantalla filtrada por un comercio
+  final String? filterComercioId;
+  final String? filterComercioName;
+
+  const OfertasPage({
+    super.key,
+    this.filterComercioId,
+    this.filterComercioName,
+  });
 
   @override
   State<OfertasPage> createState() => _OfertasPageState();
@@ -22,14 +30,23 @@ class _OfertasPageState extends State<OfertasPage> {
   final _picker = ImagePicker();
   XFile? _fotoTmp;
 
-  // Filtros
+  // Filtros (se inicializa con lo recibido por parámetro si vino)
   String? _filtroComercioId;
   String? _filtroComercioNombre;
   bool _soloActivas = false;
 
   @override
+  void initState() {
+    super.initState();
+    _filtroComercioId = widget.filterComercioId;
+    _filtroComercioNombre = widget.filterComercioName;
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final col = FirebaseFirestore.instance.collection('ofertas');
+    // Usamos SOLO la colección global "ofertas" (evita duplicados si también
+    // guardás una copia en /comercios/{id}/ofertas). Ordenamos por "fin".
+    final baseCol = FirebaseFirestore.instance.collection('ofertas');
 
     return Scaffold(
       appBar: AppBar(
@@ -54,14 +71,16 @@ class _OfertasPageState extends State<OfertasPage> {
           // Banner dinámico desde Firestore (si existe/activo)
           const _DynamicBanner(),
 
-          
-          
-          // Carrusel autoplay (sin índice compuesto)
+          // Carrusel autoplay (banners locales)
           const _OfertasCarrusel(),
 
           // Barra de filtros
           _FiltrosBar(
-            filtroComercioNombre: _filtroComercioNombre,
+            filtroComercioNombre: (_filtroComercioNombre?.isNotEmpty ?? false)
+                ? _filtroComercioNombre
+                : (_filtroComercioId?.isNotEmpty ?? false)
+                    ? 'ID: $_filtroComercioId'
+                    : null,
             soloActivas: _soloActivas,
             onElegirComercio: () async {
               final picked = await _seleccionarComercio(context);
@@ -78,8 +97,7 @@ class _OfertasPageState extends State<OfertasPage> {
           // Lista
           Expanded(
             child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              // Un solo orderBy para evitar índice compuesto
-              stream: col.orderBy('fin', descending: true).snapshots(),
+              stream: baseCol.orderBy('fin', descending: true).snapshots(),
               builder: (context, snap) {
                 if (snap.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
@@ -87,36 +105,45 @@ class _OfertasPageState extends State<OfertasPage> {
                 if (snap.hasError) {
                   return Center(child: Text('Error: ${snap.error}'));
                 }
+
+                // ------- C: filtros en memoria (simple y sin índices extra) -------
                 final docsAll = (snap.data?.docs ?? []).toList();
 
-                // Filtros en memoria
-                List<DocumentSnapshot<Map<String, dynamic>>> docs = docsAll.where((d) {
+                List<DocumentSnapshot<Map<String, dynamic>>> docs =
+                    docsAll.where((d) {
                   final data = d.data() ?? {};
                   final activa = (data['activa'] ?? true) == true;
-                  final comercioId = data['comercioId'] as String?;
+
+                  // 1) Solo activas
                   if (_soloActivas && !activa) return false;
+
+                  // 2) Por comercio (si está seteado)
+                  final comercioId = data['comercioId'] as String?;
                   if ((_filtroComercioId?.isNotEmpty ?? false) &&
                       comercioId != _filtroComercioId) {
                     return false;
                   }
+
                   return true;
                 }).toList();
 
-               if (docs.isEmpty) {
-               return _EmptyState(
-                title: 'Sin ofertas',
-                subtitle: 'No encontramos ofertas para los filtros elegidos.',
-                ctaLabel: kIsAdmin ? 'Crear oferta' : null,
-                 onCta: kIsAdmin ? () => _abrirFormOferta() : null,
-                 );
-                 }
+                if (docs.isEmpty) {
+                  return _EmptyState(
+                    title: 'Sin ofertas',
+                    subtitle:
+                        'No encontramos ofertas para los filtros elegidos.',
+                    ctaLabel: kIsAdmin ? 'Crear oferta' : null,
+                    onCta: kIsAdmin ? () => _abrirFormOferta() : null,
+                  );
+                }
 
-                // Reordenar: activas primero, luego por fin desc
+                // Reordenar: activas primero, luego por fecha "fin" desc
                 int activeVal(DocumentSnapshot<Map<String, dynamic>> d) =>
                     (d.data()?['activa'] == true) ? 1 : 0;
-                DateTime finOf(DocumentSnapshot<Map<String, dynamic>> d) =>
-                    (d.data()?['fin'] as Timestamp?)?.toDate() ??
-                    DateTime.fromMillisecondsSinceEpoch(0);
+                    DateTime finOf(DocumentSnapshot<Map<String, dynamic>> d) =>
+    ((d.data()?['fin'] ?? d.data()?['hasta']) as Timestamp?)
+        ?.toDate() ??
+    DateTime.fromMillisecondsSinceEpoch(0);
 
                 docs.sort((a, b) {
                   final byActive = activeVal(b) - activeVal(a);
@@ -132,12 +159,13 @@ class _OfertasPageState extends State<OfertasPage> {
                     final d = docs[i];
                     final data = d.data()!;
                     final titulo = (data['titulo'] ?? '') as String;
-                    final desc   = (data['descripcion'] ?? '') as String;
-                    final foto   = data['fotoUrl'] as String?;
+                    final desc = (data['descripcion'] ?? '') as String;
+                    final foto   = (data['fotoUrl'] ?? data['img']) as String?;
                     final activa = (data['activa'] ?? true) as bool;
                     final comercioId = data['comercioId'] as String?;
-                    final finTs = data['fin'] as Timestamp?;
-                    final finStr = finTs != null ? _fmtFecha(finTs.toDate()) : '—';
+                    final finTs  = (data['fin'] ?? data['hasta']) as Timestamp?;
+                    final finStr =
+                        finTs != null ? _fmtFecha(finTs.toDate()) : '—';
 
                     return Material(
                       color: Theme.of(context).colorScheme.surface,
@@ -148,7 +176,11 @@ class _OfertasPageState extends State<OfertasPage> {
                         onTap: () {
                           if (comercioId == null) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Esta oferta no tiene un comercio vinculado.')),
+                              const SnackBar(
+                                content: Text(
+                                  'Esta oferta no tiene un comercio vinculado.',
+                                ),
+                              ),
                             );
                             return;
                           }
@@ -173,9 +205,16 @@ class _OfertasPageState extends State<OfertasPage> {
                                   child: (foto == null || foto.isEmpty)
                                       ? Container(
                                           color: Colors.black12,
-                                          child: const Icon(Icons.local_offer, size: 32),
+                                          child: const Icon(
+                                            Icons.local_offer,
+                                            size: 32,
+                                          ),
                                         )
-                                      : Image.network(foto, fit: BoxFit.cover),
+                                    :  Image.network(
+                                      optimizeCloudinary(foto), // ✅ único posicional: la URL
+                                      fit: BoxFit.cover,        // ✅ named parameter
+                                      ),
+                                      
                                 ),
                               ),
                               const SizedBox(width: 12),
@@ -188,7 +227,9 @@ class _OfertasPageState extends State<OfertasPage> {
                                         Expanded(
                                           child: Text(
                                             titulo,
-                                            style: Theme.of(context).textTheme.titleMedium,
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .titleMedium,
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
                                           ),
@@ -199,16 +240,24 @@ class _OfertasPageState extends State<OfertasPage> {
                                               if (v == 'edit') {
                                                 _abrirFormOferta(doc: d);
                                               } else if (v == 'delete') {
-                                                final ok = await _confirmarBorrado(context, titulo);
+                                                final ok =
+                                                    await _confirmarBorrado(
+                                                        context, titulo);
                                                 if (ok) {
-                                                  await _deleteFotoByPath(data['fotoPath'] as String?);
+                                                  await _deleteFotoByPath(data[
+                                                          'fotoPath']
+                                                      as String?);
                                                   await d.reference.delete();
                                                 }
                                               }
                                             },
                                             itemBuilder: (_) => const [
-                                              PopupMenuItem(value: 'edit', child: Text('Editar')),
-                                              PopupMenuItem(value: 'delete', child: Text('Eliminar')),
+                                              PopupMenuItem(
+                                                  value: 'edit',
+                                                  child: Text('Editar')),
+                                              PopupMenuItem(
+                                                  value: 'delete',
+                                                  child: Text('Eliminar')),
                                             ],
                                           ),
                                       ],
@@ -224,21 +273,33 @@ class _OfertasPageState extends State<OfertasPage> {
                                     Row(
                                       children: [
                                         Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 8, vertical: 2),
                                           decoration: BoxDecoration(
                                             color: activa
-                                                ? Colors.green.withOpacity(.15)
-                                                : Colors.grey.withOpacity(.2),
-                                            borderRadius: BorderRadius.circular(999),
+                                                ? Colors.green
+                                                    .withOpacity(.15)
+                                                : Colors.grey
+                                                    .withOpacity(.2),
+                                            borderRadius:
+                                                BorderRadius.circular(999),
                                           ),
                                           child: Text(
-                                            activa ? 'Activa' : 'Finalizada',
-                                            style: Theme.of(context).textTheme.labelSmall,
+                                            activa
+                                                ? 'Activa'
+                                                : 'Finalizada',
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .labelSmall,
                                           ),
                                         ),
                                         const SizedBox(width: 8),
-                                        Text('Hasta $finStr',
-                                            style: Theme.of(context).textTheme.bodySmall),
+                                        Text(
+                                          'Hasta $finStr',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall,
+                                        ),
                                       ],
                                     ),
                                   ],
@@ -268,194 +329,217 @@ class _OfertasPageState extends State<OfertasPage> {
   }
 
   // ---------- Form crear/editar ----------
-  Future<void> _abrirFormOferta({DocumentSnapshot<Map<String, dynamic>>? doc}) async {
+  Future<void> _abrirFormOferta(
+      {DocumentSnapshot<Map<String, dynamic>>? doc}) async {
     final isEdit = doc != null;
     final data = doc?.data();
 
     final tituloCtrl = TextEditingController(text: data?['titulo'] ?? '');
-    final descCtrl   = TextEditingController(text: data?['descripcion'] ?? '');
+    final descCtrl = TextEditingController(text: data?['descripcion'] ?? '');
 
-    // Selector de comercio
-    String? selectedComercioId   = data?['comercioId'] as String?;
+    // Selector de comercio (prellenamos con el filtro actual si existe)
+    String? selectedComercioId = data?['comercioId'] as String? ??
+        _filtroComercioId ??
+        widget.filterComercioId;
     String? selectedComercioName;
 
     if (selectedComercioId != null && selectedComercioId.isNotEmpty) {
       try {
         final snap = await FirebaseFirestore.instance
-            .collection('comercios').doc(selectedComercioId).get();
+            .collection('comercios')
+            .doc(selectedComercioId)
+            .get();
         selectedComercioName = (snap.data()?['nombre'] ?? '') as String?;
       } catch (_) {}
     }
 
     DateTime? inicio = (data?['inicio'] as Timestamp?)?.toDate();
-    DateTime? fin    = (data?['fin'] as Timestamp?)?.toDate();
-    bool activa      = (data?['activa'] ?? true) as bool;
-    bool destacada   = (data?['destacada'] ?? false) as bool;
+    DateTime? fin = (data?['fin'] as Timestamp?)?.toDate();
+    bool activa = (data?['activa'] ?? true) as bool;
+    bool destacada = (data?['destacada'] ?? false) as bool;
     String? fotoUrlPreview = data?['fotoUrl'] as String?;
     _fotoTmp = null;
 
     final ok = await showDialog<bool>(
-      context: context,
-      builder: (_) => StatefulBuilder(
-        builder: (ctx, setLocal) => AlertDialog(
-          title: Text(isEdit ? 'Editar oferta' : 'Nueva oferta'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Foto
-                GestureDetector(
-                  onTap: () async {
-                    final x = await _picker.pickImage(
-                      source: ImageSource.gallery,
-                      imageQuality: 75,
-                    );
-                    if (x != null) setLocal(() => _fotoTmp = x);
-                  },
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: SizedBox(
-                      width: 120,
-                      height: 120,
-                      child: _fotoTmp != null
-                          ? Image.file(File(_fotoTmp!.path), fit: BoxFit.cover)
-                          : (fotoUrlPreview != null && fotoUrlPreview!.isNotEmpty)
-                              ? Image.network(fotoUrlPreview!, fit: BoxFit.cover)
-                              : Container(
-                                  color: Colors.black12,
-                                  child: const Icon(Icons.add_a_photo, size: 36),
-                                ),
-                    ),
-                  ),
-                ),
-                if (_fotoTmp != null || (fotoUrlPreview ?? '').isNotEmpty)
-                  TextButton.icon(
-                    onPressed: () => setLocal(() {
-                      _fotoTmp = null;
-                      fotoUrlPreview = null;
-                    }),
-                    icon: const Icon(Icons.delete_outline),
-                    label: const Text('Quitar foto'),
-                  ),
-                const SizedBox(height: 8),
-
-                TextField(
-                  controller: tituloCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Título',
-                    prefixIcon: Icon(Icons.title),
-                  ),
-                ),
-                const SizedBox(height: 8),
-
-                TextField(
-                  controller: descCtrl,
-                  maxLines: 2,
-                  decoration: const InputDecoration(
-                    labelText: 'Descripción',
-                    prefixIcon: Icon(Icons.notes),
-                  ),
-                ),
-                const SizedBox(height: 8),
-
-                // Selector de comercio
-                InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: () async {
-                    final picked = await _seleccionarComercio(context);
-                    if (picked != null) {
-                      setLocal(() {
-                        selectedComercioId   = picked['id'];
-                        selectedComercioName = picked['nombre'];
-                      });
-                    }
-                  },
-                  child: InputDecorator(
-                    decoration: const InputDecoration(
-                      labelText: 'Comercio',
-                      prefixIcon: Icon(Icons.store_mall_directory),
-                      border: OutlineInputBorder(),
-                    ),
-                    child: Text(
-                      (selectedComercioName?.isNotEmpty ?? false)
-                          ? selectedComercioName!
-                          : (selectedComercioId?.isNotEmpty ?? false)
-                              ? 'ID: $selectedComercioId'
-                              : 'Tocá para elegir un comercio',
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-
-                Row(
+          context: context,
+          builder: (_) => StatefulBuilder(
+            builder: (ctx, setLocal) => AlertDialog(
+              title: Text(isEdit ? 'Editar oferta' : 'Nueva oferta'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        icon: const Icon(Icons.calendar_today),
-                        label: Text(inicio == null ? 'Desde' : _fmtFecha(inicio!)),
-                        onPressed: () async {
-                          final today = DateTime.now();
-                          final picked = await showDatePicker(
-                            context: ctx,
-                            firstDate: DateTime(today.year - 1),
-                            lastDate: DateTime(today.year + 3),
-                            initialDate: inicio ?? today,
-                          );
-                          if (picked != null) setLocal(() => inicio = picked);
-                        },
+                    // Foto
+                    GestureDetector(
+                      onTap: () async {
+                        final x = await _picker.pickImage(
+                          source: ImageSource.gallery,
+                          imageQuality: 75,
+                        );
+                        if (x != null) setLocal(() => _fotoTmp = x);
+                      },
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: SizedBox(
+                          width: 120,
+                          height: 120,
+                          child: _fotoTmp != null
+                              ? Image.file(File(_fotoTmp!.path),
+                                  fit: BoxFit.cover)
+                              : (fotoUrlPreview != null &&
+                                      fotoUrlPreview!.isNotEmpty)
+                                  ? Image.network(fotoUrlPreview!,
+                                      fit: BoxFit.cover)
+                                  : Container(
+                                      color: Colors.black12,
+                                      child: const Icon(Icons.add_a_photo,
+                                          size: 36),
+                                    ),
+                        ),
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        icon: const Icon(Icons.event),
-                        label: Text(fin == null ? 'Hasta' : _fmtFecha(fin!)),
-                        onPressed: () async {
-                          final today = DateTime.now();
-                          final picked = await showDatePicker(
-                            context: ctx,
-                            firstDate: DateTime(today.year - 1),
-                            lastDate: DateTime(today.year + 3),
-                            initialDate: fin ?? (inicio ?? today),
-                          );
-                          if (picked != null) setLocal(() => fin = picked);
-                        },
+                    if (_fotoTmp != null ||
+                        (fotoUrlPreview ?? '').isNotEmpty)
+                      TextButton.icon(
+                        onPressed: () => setLocal(() {
+                          _fotoTmp = null;
+                          fotoUrlPreview = null;
+                        }),
+                        icon: const Icon(Icons.delete_outline),
+                        label: const Text('Quitar foto'),
+                      ),
+                    const SizedBox(height: 8),
+
+                    TextField(
+                      controller: tituloCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Título',
+                        prefixIcon: Icon(Icons.title),
                       ),
                     ),
-                  ],
-                ),
-                const SizedBox(height: 8),
+                    const SizedBox(height: 8),
 
-                Row(
-                  children: [
-                    const Text('Activa'),
-                    const Spacer(),
-                    Switch(
-                      value: activa,
-                      onChanged: (v) => setLocal(() => activa = v),
+                    TextField(
+                      controller: descCtrl,
+                      maxLines: 2,
+                      decoration: const InputDecoration(
+                        labelText: 'Descripción',
+                        prefixIcon: Icon(Icons.notes),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+
+                    // Selector de comercio
+                    InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () async {
+                        final picked = await _seleccionarComercio(context);
+                        if (picked != null) {
+                          setLocal(() {
+                            selectedComercioId = picked['id'];
+                            selectedComercioName = picked['nombre'];
+                          });
+                        }
+                      },
+                      child: InputDecorator(
+                        decoration: const InputDecoration(
+                          labelText: 'Comercio',
+                          prefixIcon: Icon(Icons.store_mall_directory),
+                          border: OutlineInputBorder(),
+                        ),
+                        child: Text(
+                          (selectedComercioName?.isNotEmpty ?? false)
+                              ? selectedComercioName!
+                              : (selectedComercioId?.isNotEmpty ?? false)
+                                  ? 'ID: $selectedComercioId'
+                                  : 'Tocá para elegir un comercio',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.calendar_today),
+                            label: Text(inicio == null
+                                ? 'Desde'
+                                : _fmtFecha(inicio!)),
+                            onPressed: () async {
+                              final today = DateTime.now();
+                              final picked = await showDatePicker(
+                                context: ctx,
+                                firstDate: DateTime(today.year - 1),
+                                lastDate: DateTime(today.year + 3),
+                                initialDate: inicio ?? today,
+                              );
+                              if (picked != null) {
+                                setLocal(() => inicio = picked);
+                              }
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.event),
+                            label: Text(
+                                fin == null ? 'Hasta' : _fmtFecha(fin!)),
+                            onPressed: () async {
+                              final today = DateTime.now();
+                              final picked = await showDatePicker(
+                                context: ctx,
+                                firstDate: DateTime(today.year - 1),
+                                lastDate: DateTime(today.year + 3),
+                                initialDate: fin ?? (inicio ?? today),
+                              );
+                              if (picked != null) {
+                                setLocal(() => fin = picked);
+                              }
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                   
+
+                    Row(
+                      children: [
+                        const Text('Activa'),
+                        const Spacer(),
+                        Switch(
+                          value: activa,
+                          onChanged: (v) => setLocal(() => activa = v),
+                        ),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        const Text('Destacada (carrusel)'),
+                        const Spacer(),
+                        Switch(
+                          value: destacada,
+                          onChanged: (v) => setLocal(() => destacada = v),
+                        ),
+                      ],
                     ),
                   ],
                 ),
-                Row(
-                  children: [
-                    const Text('Destacada (carrusel)'),
-                    const Spacer(),
-                    Switch(
-                      value: destacada,
-                      onChanged: (v) => setLocal(() => destacada = v),
-                    ),
-                  ],
-                ),
+              ),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('Cancelar')),
+                FilledButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    child: const Text('Guardar')),
               ],
             ),
           ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Guardar')),
-          ],
-        ),
-      ),
-    ) ?? false;
+        ) ??
+        false;
 
     if (!ok) {
       setState(() => _fotoTmp = null);
@@ -464,16 +548,22 @@ class _OfertasPageState extends State<OfertasPage> {
 
     final titulo = tituloCtrl.text.trim();
     if (titulo.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Falta el título')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Falta el título')));
       return;
     }
 
     final payload = <String, dynamic>{
       'titulo': titulo,
       'descripcion': descCtrl.text.trim(),
-      'comercioId': (selectedComercioId?.isNotEmpty ?? false) ? selectedComercioId : null,
-      'inicio': inicio != null ? Timestamp.fromDate(inicio!) : FieldValue.delete(),
-      'fin': fin != null ? Timestamp.fromDate(fin!) : FieldValue.delete(),
+      'comercioId': (selectedComercioId?.isNotEmpty ?? false)
+          ? selectedComercioId
+          : null,
+      'inicio': inicio != null
+          ? Timestamp.fromDate(inicio!)
+          : FieldValue.delete(),
+      'fin':
+          fin != null ? Timestamp.fromDate(fin!) : FieldValue.delete(),
       'activa': activa,
       'destacada': destacada,
       'updatedAt': FieldValue.serverTimestamp(),
@@ -483,15 +573,17 @@ class _OfertasPageState extends State<OfertasPage> {
 
     try {
       if (isEdit) {
-        await doc.reference.update(payload);
+        await doc!.reference.update(payload);
 
         if (_fotoTmp != null) {
           await _deleteFotoByPath(data?['fotoPath'] as String?);
           final up = await _uploadFoto(doc.id);
           if (up != null) {
-            await doc.reference.update({'fotoUrl': up.url, 'fotoPath': up.path});
+            await doc.reference
+                .update({'fotoUrl': up.url, 'fotoPath': up.path});
           }
-        } else if ((fotoUrlPreview ?? '').isEmpty && (data?['fotoPath'] != null)) {
+        } else if ((fotoUrlPreview ?? '').isEmpty &&
+            (data?['fotoPath'] != null)) {
           await _deleteFotoByPath(data?['fotoPath'] as String?);
           await doc.reference.update({
             'fotoUrl': FieldValue.delete(),
@@ -515,9 +607,8 @@ class _OfertasPageState extends State<OfertasPage> {
     }
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(isEdit ? 'Oferta actualizada' : 'Oferta creada')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(isEdit ? 'Oferta actualizada' : 'Oferta creada')));
     }
   }
 
@@ -526,29 +617,37 @@ class _OfertasPageState extends State<OfertasPage> {
     if (_fotoTmp == null) return null;
     final path = 'ofertas/$ofertaId/foto.jpg';
     final ref = FirebaseStorage.instance.ref().child(path);
-    await ref.putFile(File(_fotoTmp!.path), SettableMetadata(contentType: 'image/jpeg'));
+    await ref.putFile(
+        File(_fotoTmp!.path), SettableMetadata(contentType: 'image/jpeg'));
     final url = await ref.getDownloadURL();
     return (url: url, path: path);
   }
 
   Future<void> _deleteFotoByPath(String? path) async {
     if (path == null || path.isEmpty) return;
-    try { await FirebaseStorage.instance.ref().child(path).delete(); } catch (_) {}
+    try {
+      await FirebaseStorage.instance.ref().child(path).delete();
+    } catch (_) {}
   }
 
   // ---------- Utils ----------
   static String _fmtFecha(DateTime d) =>
       '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
 
-  Future<bool> _confirmarBorrado(BuildContext context, String titulo) async {
+  Future<bool> _confirmarBorrado(
+      BuildContext context, String titulo) async {
     return await showDialog<bool>(
           context: context,
           builder: (_) => AlertDialog(
             title: const Text('Confirmar borrado'),
             content: Text('¿Eliminar la oferta "$titulo"?'),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
-              FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Eliminar')),
+              TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancelar')),
+              FilledButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Eliminar')),
             ],
           ),
         ) ??
@@ -556,7 +655,8 @@ class _OfertasPageState extends State<OfertasPage> {
   }
 
   // ---------- Selector de comercio ----------
-  Future<Map<String, String>?> _seleccionarComercio(BuildContext parentCtx) async {
+  Future<Map<String, String>?> _seleccionarComercio(
+      BuildContext parentCtx) async {
     return await showModalBottomSheet<Map<String, String>>(
       context: parentCtx,
       isScrollControlled: true,
@@ -572,32 +672,42 @@ class _OfertasPageState extends State<OfertasPage> {
                   title: Text('Elegir comercio'),
                 ),
                 Expanded(
-                  child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  child:
+                      StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                     stream: col.orderBy('nombre').snapshots(),
                     builder: (context, snap) {
                       if (!snap.hasData) {
-                        return const Center(child: CircularProgressIndicator());
+                        return const Center(
+                            child: CircularProgressIndicator());
                       }
                       final docs = snap.data!.docs;
                       if (docs.isEmpty) {
-                        return const Center(child: Text('No hay comercios.'));
+                        return const Center(
+                            child: Text('No hay comercios.'));
                       }
                       return ListView.builder(
                         itemCount: docs.length,
                         itemBuilder: (_, i) {
                           final d = docs[i];
                           final data = d.data();
-                          final nombre = (data['nombre'] ?? '') as String;
-                          final ciudad = (data['ciudad'] ?? '') as String?;
-                          final provincia = (data['provincia'] ?? '') as String?;
+                          final nombre =
+                              (data['nombre'] ?? '') as String;
+                          final ciudad =
+                              (data['ciudad'] ?? '') as String?;
+                          final provincia =
+                              (data['provincia'] ?? '') as String?;
                           final subt = [
-                            if (ciudad != null && ciudad.isNotEmpty) ciudad,
-                            if (provincia != null && provincia.isNotEmpty) provincia,
+                            if (ciudad != null && ciudad.isNotEmpty)
+                              ciudad,
+                            if (provincia != null &&
+                                provincia.isNotEmpty)
+                              provincia,
                           ].join(' • ');
                           return ListTile(
                             leading: const Icon(Icons.storefront),
                             title: Text(nombre),
-                            subtitle: subt.isEmpty ? null : Text(subt),
+                            subtitle:
+                                subt.isEmpty ? null : Text(subt),
                             onTap: () => Navigator.pop(ctx, {
                               'id': d.id,
                               'nombre': nombre,
@@ -625,7 +735,6 @@ class _DynamicBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final col = FirebaseFirestore.instance.collection('banners');
 
-    // preferimos doc 'home', si no existe usamos primero activo
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: col.doc('home').snapshots(),
       builder: (context, homeSnap) {
@@ -686,7 +795,7 @@ class _BannerCard extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
       child: AspectRatio(
-        aspectRatio: 16 / 9, // misma proporción que tus banners locales
+        aspectRatio: 16 / 9,
         child: ClipRRect(
           borderRadius: BorderRadius.circular(16),
           child: Container(
@@ -709,7 +818,8 @@ class _BannerCard extends StatelessWidget {
                       if (titulo.isNotEmpty)
                         Text(
                           titulo,
-                          style: Theme.of(context).textTheme.titleMedium,
+                          style:
+                              Theme.of(context).textTheme.titleMedium,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -717,7 +827,8 @@ class _BannerCard extends StatelessWidget {
                         const SizedBox(height: 6),
                         Text(
                           texto,
-                          style: Theme.of(context).textTheme.bodySmall,
+                          style:
+                              Theme.of(context).textTheme.bodySmall,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -734,7 +845,9 @@ class _BannerCard extends StatelessWidget {
                       onPressed: () async {
                         final uri = Uri.tryParse(ctaUrl);
                         if (uri != null) {
-                          await launchUrl(uri, mode: LaunchMode.externalApplication);
+                          await launchUrl(uri,
+                              mode:
+                                  LaunchMode.externalApplication);
                         }
                       },
                       child: Text(ctaLabel),
@@ -770,19 +883,72 @@ class _LocalBanner extends StatelessWidget {
   }
 }
 
-// ====== Carrusel autoplay de ofertas destacadas (sin índice compuesto) ======
+// ====== Carrusel autoplay de ofertas destacadas (banners locales) ======
 class _OfertasCarrusel extends StatefulWidget {
   const _OfertasCarrusel();
 
   @override
   State<_OfertasCarrusel> createState() => _OfertasCarruselState();
 }
+
 class _OfertasCarruselState extends State<_OfertasCarrusel> {
   final _pageCtrl = PageController(viewportFraction: .9);
   Timer? _timer;
   int _idx = 0;
 
-  // 👉 Lista de imágenes locales (asegurate de tenerlas en pubspec.yaml)
+// === Cloudinary: optimización de URL (si la imagen viene de Cloudinary) ===
+String optimizeCloudinary(String? url, {String tr = 'f_auto,q_auto,c_fill,ar_16:9,w_900'}) {
+  if (url == null || url.isEmpty) return '';
+  if (!url.contains('res.cloudinary.com') || !url.contains('/image/upload/')) return url;
+  return url.replaceFirst('/image/upload/', '/image/upload/$tr/');
+}
+
+// === Contacto: WhatsApp & Llamar ===
+Future<void> _contactarWhatsApp(BuildContext context,
+    {required String? comercioId, required String titulo}) async {
+  String? tel;
+  try {
+    if (comercioId != null && comercioId.isNotEmpty) {
+      final snap = await FirebaseFirestore.instance.collection('comercios').doc(comercioId).get();
+      final d = snap.data();
+      tel = (d?['telefono'] ?? d?['tel'] ?? d?['whatsapp'] ?? '').toString();
+    }
+  } catch (_) {}
+  if (tel == null || tel.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Este comercio no tiene WhatsApp configurado.')),
+    );
+    return;
+  }
+  final phone = tel.replaceAll(RegExp(r'[^0-9+]'), '');
+  final msg = Uri.encodeComponent('Hola! Vi la oferta "$titulo" en DESCABIO 🍻');
+  final uri = Uri.parse('https://wa.me/$phone?text=$msg');
+  await launchUrl(uri, mode: LaunchMode.externalApplication);
+}
+
+Future<void> _llamarComercio(BuildContext context, {required String? comercioId}) async {
+  String? tel;
+  try {
+    if (comercioId != null && comercioId.isNotEmpty) {
+      final snap = await FirebaseFirestore.instance.collection('comercios').doc(comercioId).get();
+      final d = snap.data();
+      tel = (d?['telefono'] ?? d?['tel'] ?? '').toString();
+    }
+  } catch (_) {}
+  if (tel == null || tel.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Este comercio no tiene teléfono configurado.')),
+    );
+    return;
+  }
+  final phone = tel.replaceAll(RegExp(r'[^0-9+]'), '');
+  final uri = Uri.parse('tel:$phone');
+  await launchUrl(uri, mode: LaunchMode.externalApplication);
+}
+
+
+
+  // Asegurate de declarar estos assets en pubspec.yaml
   final List<String> _localImages = const [
     'assets/banners/imagen2x1.jpg',
     'assets/banners/prueba.jpg',
@@ -856,8 +1022,6 @@ class _FiltrosBar extends StatelessWidget {
     required this.onToggleActivas,
   });
 
-
-
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -882,7 +1046,8 @@ class _FiltrosBar extends StatelessWidget {
             onTap: () => onToggleActivas(!soloActivas),
             borderRadius: BorderRadius.circular(12),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               decoration: BoxDecoration(
                 color: cs.surfaceContainerHighest.withOpacity(.6),
                 borderRadius: BorderRadius.circular(12),
@@ -927,14 +1092,18 @@ class _EmptyState extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.local_offer_outlined, size: 64, color: cs.outline),
+            Icon(Icons.local_offer_outlined,
+                size: 64, color: cs.outline),
             const SizedBox(height: 12),
             Text(title, style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 6),
             Text(
               subtitle,
               textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.outline),
+              style: Theme.of(context)
+                  .textTheme
+                  .bodyMedium
+                  ?.copyWith(color: cs.outline),
             ),
             if (ctaLabel != null && onCta != null) ...[
               const SizedBox(height: 16),
@@ -949,4 +1118,15 @@ class _EmptyState extends StatelessWidget {
       ),
     );
   }
+}
+// ─── Utils: aplicar transformaciones de Cloudinary en la URL ───
+String optimizeCloudinary(
+  String url, {
+  String tr = 'f_auto,q_auto,c_fill,ar_1:1,w_84,h_84',
+}) {
+  if (url.isEmpty) return url;
+  const marker = '/image/upload/';
+  final i = url.indexOf(marker);
+  if (i == -1) return url; // no es Cloudinary: devolvés la misma URL
+  return url.replaceFirst(marker, '$marker$tr/');
 }

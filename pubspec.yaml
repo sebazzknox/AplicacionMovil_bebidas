@@ -37,6 +37,9 @@ dependencies:
   # Charts
   fl_chart: ^0.66.2
 
+  #Iconografia
+  phosphor_flutter: ^2.0.1
+
   # Localizations
   flutter_localizations:
     sdk: flutter

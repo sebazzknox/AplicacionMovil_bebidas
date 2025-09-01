@@ -9,6 +9,9 @@ import 'ofertas_page.dart' show OfertasPage;
 import 'admin_state.dart';                            // ⬅️ define adminMode y kIsAdmin globales
 import 'admin_panel_page.dart';
 import 'services/analytics_service.dart';
+import 'dart:ui';
+import 'package:google_fonts/google_fonts.dart';
+import 'promos_destacadas.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
@@ -67,24 +70,75 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
-    return Scaffold(
-      body: CustomScrollView(
-        slivers: [
-          SliverAppBar.large(
-            backgroundColor: cs.surface,
-            title: const Text('Bebidas cerca de vos'),
-            flexibleSpace: FlexibleSpaceBar(
-              background: Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [cs.primaryContainer, cs.surface],
-                  ),
-                ),
-              ),
+return Scaffold(
+  body: CustomScrollView(
+    slivers: [
+      SliverAppBar.large(
+  expandedHeight: 220,
+  pinned: true,
+  backgroundColor: cs.surface,
+  flexibleSpace: FlexibleSpaceBar(
+    // En vez de usar title/titlePadding, armamos todo en el background
+    background: Stack(
+      fit: StackFit.expand,
+      children: [
+        // Fondo con gradiente que respeta el tema
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                cs.primaryContainer,
+                cs.tertiaryContainer,
+              ],
             ),
           ),
+        ),
+
+        // Contenido centrado: logo + subtítulo
+        Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Hacemos el logo más grande con un scale
+              Transform.scale(
+                scale: 1.7, // ↔️ ajustá si lo querés aún más grande
+                child: const DescabioLogoTitle(),
+              ),
+              const SizedBox(height: 10),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Text(
+                  'La mejor app para distribución de bebidas',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: cs.onPrimaryContainer.withOpacity(.95),
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: .2,
+                      ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  ),
+),
+
+      const SliverToBoxAdapter(
+        child: GreetingHeader(),
+      ),
+
+      // …tus otros slivers aquí
+         
+
+
+  
+
+
+ // ✅ solo acá va el ; porque termina el return
 
           // -------- BANNER ADMIN ARRIBA (solo si adminMode = true) --------
           SliverToBoxAdapter(
@@ -141,7 +195,8 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
           ),
 
           // -------- Banner publicitario arriba del buscador --------
-          const SliverToBoxAdapter(child: _HomePromoBanner()),
+           SliverToBoxAdapter(child: _HomePromoBanner()),
+                SliverToBoxAdapter(child:_GifPromoBanner()),
 
           // -------- Chips rápidos de promos --------
           SliverToBoxAdapter(
@@ -155,6 +210,10 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
               ),
             ),
           ),
+
+          // … por ejemplo después de los chips/promos
+           const SliverToBoxAdapter(child: SizedBox(height: 8)),
+            SliverToBoxAdapter(child: PromosDestacadas()),
 
           // -------- CONTENIDO ORIGINAL --------
           SliverToBoxAdapter(
@@ -494,6 +553,7 @@ class _Dot extends StatelessWidget {
   }
 }
 
+
 /// ===== Fila de chips promocionales =====
 class _PromoChipsRow extends StatelessWidget {
   final void Function(BuildContext) onTapChip;
@@ -617,6 +677,227 @@ class _ActionCard extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+// --- Header con saludo dinámico y fondo con gradiente ---
+class GreetingHeader extends StatelessWidget {
+  const GreetingHeader({super.key});
+
+  String _greeting() {
+    final h = DateTime.now().hour;
+    if (h < 12) return '¡Buen día!';
+    if (h < 19) return '¡Buenas tardes!';
+    return '¡Buenas noches!';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            cs.primaryContainer.withOpacity(.9),
+            cs.secondaryContainer.withOpacity(.9),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: cs.onPrimaryContainer.withOpacity(.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(Icons.local_drink, color: cs.onPrimaryContainer),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(_greeting(),
+                    style: text.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: cs.onPrimaryContainer,
+                    )),
+                const SizedBox(height: 4),
+                Text('Descubrí ofertas y bebidas cerca de vos',
+                    style: text.bodySmall?.copyWith(
+                      color: cs.onPrimaryContainer.withOpacity(.85),
+                    )),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+// --- Card con efecto “vidrio” (glassmorphism) ---
+class GlassCard extends StatelessWidget {
+  final Widget child;
+  final EdgeInsetsGeometry? padding;
+  final VoidCallback? onTap;
+
+  const GlassCard({
+    super.key,
+    required this.child,
+    this.padding,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final base = isDark ? Colors.white : Colors.black;
+
+    final card = ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+        child: Container(
+          decoration: BoxDecoration(
+            color: base.withOpacity(isDark ? .08 : .06),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: base.withOpacity(isDark ? .18 : .12),
+              width: 1,
+            ),
+          ),
+          padding: padding ?? const EdgeInsets.all(16),
+          child: child,
+        ),
+      ),
+    );
+
+    if (onTap == null) return card;
+
+    return _TapScale(
+      scale: .98,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: card,
+      ),
+    );
+  }
+}
+
+// Animación sutil de “presionado”
+class _TapScale extends StatefulWidget {
+  final Widget child;
+  final double scale;
+  const _TapScale({required this.child, this.scale = .98});
+
+  @override
+  State<_TapScale> createState() => _TapScaleState();
+}
+
+class _TapScaleState extends State<_TapScale> {
+  bool _down = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _down = true),
+      onTapUp: (_) => setState(() => _down = false),
+      onTapCancel: () => setState(() => _down = false),
+      child: AnimatedScale(
+        duration: const Duration(milliseconds: 110),
+        scale: _down ? widget.scale : 1,
+        child: widget.child,
+      ),
+    );
+  }
+}
+class DescabioLogoTitle extends StatefulWidget {
+  const DescabioLogoTitle({super.key});
+  @override
+  State<DescabioLogoTitle> createState() => _DescabioLogoTitleState();
+}
+
+class _DescabioLogoTitleState extends State<DescabioLogoTitle>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 2200),
+  )..repeat(reverse: true);
+
+  late final Animation<double> _scale =
+      CurvedAnimation(parent: _c, curve: Curves.easeInOut)
+          .drive(Tween(begin: 0.96, end: 1.04));
+
+  @override
+  void dispose() { _c.dispose(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) {
+    return Hero(
+      tag: 'app_logo',
+      child: ScaleTransition(
+        scale: _scale,
+        child: ShaderMask(
+          shaderCallback: (r) => const LinearGradient(
+            colors: [Color(0xFF7C4DFF), Color(0xFFFF4081)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ).createShader(r),
+          child: Text(
+            'DESCABIO',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.bangers(
+              fontSize: 26,
+              letterSpacing: 1.5,
+              fontWeight: FontWeight.w800,
+              color: Colors.white,
+              height: 1,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+class _GifPromoBanner extends StatelessWidget {
+  final _gifs = const [
+    'assets/gifs/beer_ad.gif',
+    'assets/gifs/drinks_offer.gif',
+  ];
+
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 180,
+      child: PageView.builder(
+        itemCount: _gifs.length,
+        controller: PageController(viewportFraction: .9),
+        itemBuilder: (_, i) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: Image.asset(
+                _gifs[i],
+                fit: BoxFit.cover,
+              ),
+            ),
+          );
+        },
       ),
     );
   }

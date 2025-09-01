@@ -68,7 +68,7 @@ class _SplashScreenState extends State<SplashScreen>
         ),
         child: Stack(
           children: [
-            // Manchones / brillos “barrio vibe”
+            // Manchones / brillos
             Positioned(
               top: -40, left: -20,
               child: _blob(cs.primary.withOpacity(.15), 180),
@@ -90,22 +90,25 @@ class _SplashScreenState extends State<SplashScreen>
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          // Texto con gradiente tipo graffiti/pop
-                          ShaderMask(
-                            shaderCallback: (rect) => const LinearGradient(
-                              colors: [Color(0xFF7C4DFF), Color(0xFFFF4081)],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ).createShader(rect),
-                            child: Text(
-                              'DESCABIO',
-                              textAlign: TextAlign.center,
-                              style: GoogleFonts.bangers( // look callejero
-                                fontSize: 52,
-                                letterSpacing: 2,
-                                fontWeight: FontWeight.w700,
-                                color: Colors.white, // se reemplaza por shader
-                                height: 1.0,
+                          // HERO para enlazar con el título del AppBar
+                          Hero(
+                            tag: 'app_logo',
+                            child: ShaderMask(
+                              shaderCallback: (rect) => const LinearGradient(
+                                colors: [Color(0xFF7C4DFF), Color(0xFFFF4081)],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ).createShader(rect),
+                              child: Text(
+                                'DESCABIO',
+                                textAlign: TextAlign.center,
+                                style: GoogleFonts.bangers(
+                                  fontSize: 52,
+                                  letterSpacing: 2,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.white, // reemplazado por shader
+                                  height: 1.0,
+                                ),
                               ),
                             ),
                           ),

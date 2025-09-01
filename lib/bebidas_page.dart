@@ -1,4 +1,4 @@
-// bebidas_page.dart
+// lib/bebidas_page.dart
 import 'dart:io';
 import 'dart:math' show min;
 
@@ -7,8 +7,9 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
-import 'admin_state.dart'; // adminMode (ValueNotifier<bool>)
-import 'comercios_page.dart' show ComerciosPage;
+import 'admin_state.dart' show adminMode; // adminMode (ValueNotifier<bool>)
+import 'comercios_page.dart' show kIsAdmin; // flag admin
+import 'ofertas_page.dart' show OfertasPage; // 👈 para navegar al listado de ofertas
 
 class BebidasPage extends StatefulWidget {
   const BebidasPage({
@@ -27,9 +28,9 @@ class BebidasPage extends StatefulWidget {
 class _BebidasPageState extends State<BebidasPage> {
   final _busquedaCtrl = TextEditingController();
   String _q = '';
-  String _cat = 'todas';        // ahora solo: 'todas' | 'cervezas'
-  bool _soloPromos = false;     // “Ofertas”
-  bool _mostrarInactivas = false; // visible solo para admin
+  String _cat = 'todas';           // 'todas' | 'cervezas'
+  bool _soloPromos = false;        // “Ofertas” (solo para el estado visual)
+  bool _mostrarInactivas = false;  // visible solo para admin
 
   final _picker = ImagePicker();
   XFile? _fotoTmp;
@@ -49,12 +50,14 @@ class _BebidasPageState extends State<BebidasPage> {
   }
 
   Stream<QuerySnapshot<Map<String, dynamic>>> _streamBebidas(
-      String comercioId) {
+    String comercioId,
+  ) {
     return _bebidasCol(comercioId).orderBy('nombre').snapshots();
   }
 
   List<Map<String, dynamic>> _aplicarFiltros(
-      List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  ) {
     final q = _q.trim().toLowerCase();
 
     return docs
@@ -93,7 +96,9 @@ class _BebidasPageState extends State<BebidasPage> {
   }
 
   Future<({String url, String path})?> _uploadFoto(
-      String comercioId, String bebidaId) async {
+    String comercioId,
+    String bebidaId,
+  ) async {
     if (_fotoTmp == null) return null;
     final file = File(_fotoTmp!.path);
     final path = 'bebidas/$comercioId/$bebidaId.jpg';
@@ -125,14 +130,17 @@ class _BebidasPageState extends State<BebidasPage> {
           builder: (_) => AlertDialog(
             title: const Text('Eliminar bebida'),
             content: Text(
-                '¿Eliminar "${data['nombre'] ?? 'bebida'}"? Esta acción no se puede deshacer.'),
+              '¿Eliminar "${data['nombre'] ?? 'bebida'}"? Esta acción no se puede deshacer.',
+            ),
             actions: [
               TextButton(
-                  onPressed: () => Navigator.pop(context, false),
-                  child: const Text('Cancelar')),
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancelar'),
+              ),
               FilledButton(
-                  onPressed: () => Navigator.pop(context, true),
-                  child: const Text('Eliminar')),
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Eliminar'),
+              ),
             ],
           ),
         ) ??
@@ -149,30 +157,37 @@ class _BebidasPageState extends State<BebidasPage> {
     final marcaCtrl =
         TextEditingController(text: (data?['marca'] ?? '').toString());
     final volCtrl = TextEditingController(
-        text: (data?['volumenMl'] == null) ? '' : (data!['volumenMl']).toString());
+        text: (data?['volumenMl'] == null)
+            ? ''
+            : (data!['volumenMl']).toString());
     final precioCtrl = TextEditingController(
         text: (data?['precio'] == null) ? '' : data!['precio'].toString());
     final promoPrecioCtrl = TextEditingController(
-        text: (data?['promoPrecio'] == null) ? '' : data!['promoPrecio'].toString());
+        text: (data?['promoPrecio'] == null)
+            ? ''
+            : data!['promoPrecio'].toString());
     final descCtrl =
         TextEditingController(text: (data?['descripcion'] ?? '').toString());
 
-    String categoria = (data?['categoria'] ?? 'cervezas').toString().toLowerCase();
+    String categoria =
+        (data?['categoria'] ?? 'cervezas').toString().toLowerCase();
     bool promo = (data?['promo'] ?? false) == true;
     bool activo = (data?['activo'] ?? true) == true;
 
     String? fotoUrlPreview = data?['fotoUrl'] as String?;
     _fotoTmp = null;
 
-    final categorias = <String>['cervezas']; // solo una real, el resto se filtra por UI
+    final categorias = <String>['cervezas'];
 
     final ok = await showDialog<bool>(
           context: context,
           builder: (_) => StatefulBuilder(
             builder: (ctx, setLocal) => AlertDialog(
-              title: Text(isEdit
-                  ? 'Editar bebida'
-                  : 'Nueva bebida en ${widget.initialComercioNombre}'),
+              title: Text(
+                isEdit
+                    ? 'Editar bebida'
+                    : 'Nueva bebida en ${widget.initialComercioNombre}',
+              ),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -185,12 +200,22 @@ class _BebidasPageState extends State<BebidasPage> {
                           width: 120,
                           height: 120,
                           child: _fotoTmp != null
-                              ? Image.file(File(_fotoTmp!.path), fit: BoxFit.cover)
-                              : (fotoUrlPreview != null && fotoUrlPreview!.isNotEmpty)
-                                  ? Image.network(fotoUrlPreview!, fit: BoxFit.cover)
+                              ? Image.file(
+                                  File(_fotoTmp!.path),
+                                  fit: BoxFit.cover,
+                                )
+                              : (fotoUrlPreview != null &&
+                                      fotoUrlPreview!.isNotEmpty)
+                                  ? Image.network(
+                                      fotoUrlPreview!,
+                                      fit: BoxFit.cover,
+                                    )
                                   : Container(
                                       color: Colors.black12,
-                                      child: const Icon(Icons.add_a_photo, size: 36),
+                                      child: const Icon(
+                                        Icons.add_a_photo,
+                                        size: 36,
+                                      ),
                                     ),
                         ),
                       ),
@@ -225,12 +250,16 @@ class _BebidasPageState extends State<BebidasPage> {
                     const SizedBox(height: 8),
 
                     DropdownButtonFormField<String>(
-                      value: categorias.contains(categoria) ? categoria : 'cervezas',
+                      value: categorias.contains(categoria)
+                          ? categoria
+                          : 'cervezas',
                       items: categorias
-                          .map((c) => DropdownMenuItem(
-                                value: c,
-                                child: Text(c[0].toUpperCase() + c.substring(1)),
-                              ))
+                          .map(
+                            (c) => DropdownMenuItem(
+                              value: c,
+                              child: Text(c[0].toUpperCase() + c.substring(1)),
+                            ),
+                          )
                           .toList(),
                       onChanged: (v) => categoria = v ?? 'cervezas',
                       decoration: const InputDecoration(
@@ -246,7 +275,8 @@ class _BebidasPageState extends State<BebidasPage> {
                           child: TextField(
                             controller: volCtrl,
                             keyboardType:
-                                const TextInputType.numberWithOptions(decimal: false),
+                                const TextInputType.numberWithOptions(
+                                    decimal: false),
                             decoration: const InputDecoration(
                               labelText: 'Volumen (ml)',
                               prefixIcon: Icon(Icons.local_bar_outlined),
@@ -258,7 +288,8 @@ class _BebidasPageState extends State<BebidasPage> {
                           child: TextField(
                             controller: precioCtrl,
                             keyboardType:
-                                const TextInputType.numberWithOptions(decimal: true),
+                                const TextInputType.numberWithOptions(
+                                    decimal: true),
                             decoration: const InputDecoration(
                               labelText: 'Precio',
                               prefixIcon: Icon(Icons.attach_money),
@@ -279,7 +310,8 @@ class _BebidasPageState extends State<BebidasPage> {
                       TextField(
                         controller: promoPrecioCtrl,
                         keyboardType:
-                            const TextInputType.numberWithOptions(decimal: true),
+                            const TextInputType.numberWithOptions(
+                                decimal: true),
                         decoration: const InputDecoration(
                           labelText: 'Precio promo',
                           prefixIcon: Icon(Icons.local_offer_outlined),
@@ -309,11 +341,13 @@ class _BebidasPageState extends State<BebidasPage> {
               ),
               actions: [
                 TextButton(
-                    onPressed: () => Navigator.pop(ctx, false),
-                    child: const Text('Cancelar')),
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancelar'),
+                ),
                 FilledButton(
-                    onPressed: () => Navigator.pop(ctx, true),
-                    child: const Text('Guardar')),
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Guardar'),
+                ),
               ],
             ),
           ),
@@ -339,7 +373,8 @@ class _BebidasPageState extends State<BebidasPage> {
       'volumenMl': int.tryParse(volCtrl.text.trim()),
       'precio': double.tryParse(precioCtrl.text.trim()),
       'promo': promo,
-      'promoPrecio': promo ? double.tryParse(promoPrecioCtrl.text.trim()) : null,
+      'promoPrecio':
+          promo ? double.tryParse(promoPrecioCtrl.text.trim()) : null,
       'descripcion': descCtrl.text.trim(),
       'activo': activo,
       'updatedAt': FieldValue.serverTimestamp(),
@@ -353,9 +388,12 @@ class _BebidasPageState extends State<BebidasPage> {
         await _deleteFotoByPath(data?['fotoPath'] as String?);
         final up = await _uploadFoto(widget.initialComercioId, editId!);
         if (up != null) {
-          await col.doc(editId).update({'fotoUrl': up.url, 'fotoPath': up.path});
+          await col.doc(editId).update(
+            {'fotoUrl': up.url, 'fotoPath': up.path},
+          );
         }
-      } else if ((fotoUrlPreview ?? '').isEmpty && (data?['fotoPath'] != null)) {
+      } else if ((fotoUrlPreview ?? '').isEmpty &&
+          (data?['fotoPath'] != null)) {
         await _deleteFotoByPath(data?['fotoPath'] as String?);
         await col.doc(editId).update({
           'fotoUrl': FieldValue.delete(),
@@ -377,7 +415,9 @@ class _BebidasPageState extends State<BebidasPage> {
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(isEdit ? 'Bebida actualizada' : 'Bebida creada')),
+        SnackBar(
+          content: Text(isEdit ? 'Bebida actualizada' : 'Bebida creada'),
+        ),
       );
       setState(() => _fotoTmp = null);
     }
@@ -449,15 +489,30 @@ class _BebidasPageState extends State<BebidasPage> {
                       label: 'Ofertas',
                       selected: _soloPromos,
                       tint: Colors.pink,
-                      onTap: () => setState(() => _soloPromos = !_soloPromos),
+                      onTap: () {
+                        // Navega a Ofertas. Si hay comercio actual, lo filtra.
+                        final comercioId = widget.initialComercioId;
+                        if (comercioId.isEmpty) {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const OfertasPage(),
+                            ),
+                          );
+                        } else {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  OfertasPage(filterComercioId: comercioId),
+                            ),
+                          );
+                        }
+                      },
                     ),
-                    if (admin) ...[
-                     
-                    ],
                   ],
                 ),
               ),
-              
 
               // Lista
               Expanded(
@@ -492,7 +547,8 @@ class _BebidasPageState extends State<BebidasPage> {
                         final vol = (m['volumenMl'] ?? 0) as int? ?? 0;
                         final precio = (m['precio'] ?? 0).toString();
                         final promo = (m['promo'] ?? false) == true;
-                        final promoPrecio = (m['promoPrecio'] ?? 0).toString();
+                        final promoPrecio =
+                            (m['promoPrecio'] ?? 0).toString();
                         final fotoUrl = m['fotoUrl'] as String?;
                         final activo = (m['activo'] ?? true) == true;
 
@@ -527,7 +583,8 @@ class _BebidasPageState extends State<BebidasPage> {
                                         horizontal: 8, vertical: 2),
                                     decoration: BoxDecoration(
                                       color: Colors.pink.withOpacity(.12),
-                                      borderRadius: BorderRadius.circular(999),
+                                      borderRadius:
+                                          BorderRadius.circular(999),
                                     ),
                                     child: Text(
                                       '\$ $promoPrecio',
@@ -576,7 +633,6 @@ class _BebidasPageState extends State<BebidasPage> {
 
 // ---------- widgets auxiliares ----------
 
-// NUEVO: pill con icono y estado seleccionado
 class _Pill extends StatelessWidget {
   const _Pill({
     required this.icon,
@@ -613,11 +669,13 @@ class _Pill extends StatelessWidget {
             children: [
               Icon(icon, size: 18, color: fg),
               const SizedBox(width: 8),
-              Text(label,
-                  style: TextStyle(
-                    color: fg,
-                    fontWeight: FontWeight.w600,
-                  )),
+              Text(
+                label,
+                style: TextStyle(
+                  color: fg,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ],
           ),
         ),
