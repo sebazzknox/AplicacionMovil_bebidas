@@ -2,9 +2,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
-import 'admin_state.dart';               // adminMode y kIsAdmin (globales)
+import 'admin_state.dart'; // adminMode + AdminState helpers
 import 'admin_stats_page.dart';
-import 'comercios_page.dart' show ComerciosPage;  // ⬅️ solo trae la página
+import 'comercios_page.dart' show ComerciosPage;
 import 'ofertas_page.dart' show OfertasPage;
 import 'stock_page.dart';
 import 'finanzas_page.dart';
@@ -15,6 +15,7 @@ class AdminPanelPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final isAdmin = AdminState.isAdmin(context);
 
     return Scaffold(
       appBar: AppBar(
@@ -88,7 +89,7 @@ class AdminPanelPage extends StatelessWidget {
                   icon: Icons.store_mall_directory_outlined,
                   title: 'Comercios',
                   subtitle: 'Listado y edición',
-                  enabled: kIsAdmin,
+                  enabled: isAdmin,
                   onTap: (ctx) => Navigator.push(
                     ctx,
                     MaterialPageRoute(builder: (_) => const ComerciosPage()),
@@ -98,7 +99,7 @@ class AdminPanelPage extends StatelessWidget {
                   icon: Icons.local_offer_outlined,
                   title: 'Ofertas',
                   subtitle: 'Promos destacadas',
-                  enabled: kIsAdmin,
+                  enabled: isAdmin,
                   onTap: (ctx) => Navigator.push(
                     ctx,
                     MaterialPageRoute(builder: (_) => const OfertasPage()),
@@ -108,7 +109,7 @@ class AdminPanelPage extends StatelessWidget {
                   icon: Icons.inventory_2_outlined,
                   title: 'Stock',
                   subtitle: 'Por comercio',
-                  enabled: kIsAdmin,
+                  enabled: isAdmin,
                   onTap: (ctx) async {
                     final picked = await _pickComercio(ctx);
                     if (picked == null) return;
@@ -128,31 +129,29 @@ class AdminPanelPage extends StatelessWidget {
                   icon: Icons.payments_outlined,
                   title: 'Finanzas',
                   subtitle: 'Ingresos y gastos',
-                  enabled: kIsAdmin,
+                  enabled: isAdmin,
                   onTap: (ctx) => Navigator.push(
                     ctx,
                     MaterialPageRoute(builder: (_) => const FinanzasPage()),
                   ),
                 ),
-                // 👉 Nuevo tile: Estadísticas
                 _AdminTile(
                   icon: Icons.analytics_outlined,
                   title: 'Estadísticas',
                   subtitle: 'Entradas, interacciones y vistas',
-                  enabled: kIsAdmin,
+                  enabled: isAdmin,
                   onTap: (ctx) => Navigator.push(
                     ctx,
                     MaterialPageRoute(builder: (_) => const AdminStatsPage()),
                   ),
                 ),
               ],
-        
             ),
           ),
         ],
       ),
 
-      floatingActionButton: kIsAdmin
+      floatingActionButton: isAdmin
           ? FloatingActionButton.extended(
               onPressed: () => _showQuickActions(context),
               icon: const Icon(Icons.flash_on_outlined),
@@ -283,7 +282,7 @@ class _AdminTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
-    final card = InkWell(
+    return InkWell(
       borderRadius: BorderRadius.circular(16),
       onTap: enabled ? () => onTap(context) : null,
       child: Container(
@@ -299,44 +298,45 @@ class _AdminTile extends StatelessWidget {
             ),
           ],
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            CircleAvatar(
-              backgroundColor:
-                  enabled ? cs.primaryContainer : cs.surfaceContainerHighest,
-              child: Icon(
-                icon,
-                color: enabled ? cs.onPrimaryContainer : cs.outline,
+        child: Opacity(
+          opacity: enabled ? 1 : .55,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              CircleAvatar(
+                backgroundColor:
+                    enabled ? cs.primaryContainer : cs.surfaceContainerHighest,
+                child: Icon(
+                  icon,
+                  color: enabled ? cs.onPrimaryContainer : cs.outline,
+                ),
               ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              title,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: enabled ? null : cs.outline,
-                  ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              subtitle,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: enabled ? cs.onSurfaceVariant : cs.outlineVariant,
-                  ),
-            ),
-            const Spacer(),
-            Align(
-              alignment: Alignment.bottomRight,
-              child: Icon(
-                Icons.chevron_right,
-                color: enabled ? cs.primary : cs.outlineVariant,
+              const SizedBox(height: 12),
+              Text(
+                title,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: enabled ? null : cs.outline,
+                    ),
               ),
-            ),
-          ],
+              const SizedBox(height: 4),
+              Text(
+                subtitle,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: enabled ? cs.onSurfaceVariant : cs.outlineVariant,
+                    ),
+              ),
+              const Spacer(),
+              Align(
+                alignment: Alignment.bottomRight,
+                child: Icon(
+                  enabled ? Icons.chevron_right : Icons.lock_outline,
+                  color: enabled ? cs.primary : cs.outlineVariant,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
-
-    return card;
   }
 }

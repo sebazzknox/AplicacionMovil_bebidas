@@ -1,30 +1,28 @@
-// comercio_detalle_page.dart
-import 'dart:io';
+// lib/comercio_detalle_page.dart
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
-import 'package:share_plus/share_plus.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-
-// ===== Cloudinary (subida de imagen unsigned con preset) =====
-import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:http/http.dart' as http;
+import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
-// ===== Ubicación sencilla =====
-import 'package:geolocator/geolocator.dart';
+// Ubicación
 import 'package:geocoding/geocoding.dart' as gc;
+import 'package:geolocator/geolocator.dart';
 
+import 'admin_state.dart';
 import 'bebidas_page.dart';
 import 'stock_page.dart';
-import 'comercios_page.dart' show kIsAdmin;
 
 /// ----------------------------------------------------------------
 /// CONFIG CLOUDINARY (completá con los tuyos reales)
 /// ----------------------------------------------------------------
-const String _CLOUDINARY_CLOUD_NAME = 'dlk7onebj';      // p.ej: dx7onebj
-const String _CLOUDINARY_UPLOAD_PRESET = 'mi_default'; // p.ej: ml_default
+const String _CLOUDINARY_CLOUD_NAME = 'dlk7onebj';      // p.ej. dx7onebj
+const String _CLOUDINARY_UPLOAD_PRESET = 'mi_default';  // p.ej. ml_default
 /// ----------------------------------------------------------------
 
 /// ===================== Helpers generales =====================
@@ -71,6 +69,9 @@ class ComercioDetallePage extends StatefulWidget {
 class _ComercioDetallePageState extends State<ComercioDetallePage> {
   DocumentReference<Map<String, dynamic>> get _docRef =>
       FirebaseFirestore.instance.collection('comercios').doc(widget.comercioId);
+
+  /// Helper central: determina si el usuario es admin SOLO vía AdminState
+  bool _isAdmin(BuildContext context) => AdminState.isAdmin(context);
 
   // ---------- Helpers de ubicación ----------
   Future<bool> _ensurePermisosLocation() async {
@@ -175,6 +176,8 @@ class _ComercioDetallePageState extends State<ComercioDetallePage> {
 
   @override
   Widget build(BuildContext context) {
+    final isAdmin = _isAdmin(context);
+
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: _docRef.snapshots(),
       builder: (context, snap) {
@@ -226,7 +229,7 @@ class _ComercioDetallePageState extends State<ComercioDetallePage> {
           appBar: AppBar(
             title: Text(nombre.isEmpty ? 'Comercio' : nombre),
             actions: [
-              if (kIsAdmin) ...[
+              if (isAdmin) ...[
                 IconButton(
                   tooltip: 'Cambiar portada',
                   icon: const Icon(Icons.photo_library_outlined),
@@ -266,9 +269,8 @@ class _ComercioDetallePageState extends State<ComercioDetallePage> {
                 icon: const Icon(Icons.share_outlined),
                 onPressed: () {
                   final partes = <String>[];
-                  partes.add(nombre.isEmpty
-                      ? 'Mirá este comercio 👇'
-                      : 'Mirá "$nombre" 👇');
+                  partes.add(
+                      nombre.isEmpty ? 'Mirá este comercio 👇' : 'Mirá "$nombre" 👇');
                   if (direccion != null && direccion.isNotEmpty) {
                     partes.add('📍 $direccion');
                   }
@@ -290,7 +292,7 @@ class _ComercioDetallePageState extends State<ComercioDetallePage> {
                   Share.share(partes.join('\n'));
                 },
               ),
-              if (kIsAdmin)
+              if (isAdmin)
                 IconButton(
                   tooltip: 'Editar comercio',
                   icon: const Icon(Icons.edit_outlined),
@@ -308,7 +310,11 @@ class _ComercioDetallePageState extends State<ComercioDetallePage> {
 
               _HorariosRow(
                 horarios: horarios,
-                onVerMas: () => _showHorariosSheet(context, horarios, _docRef),
+                onVerMas: () => _showHorariosSheet(
+                  context,
+                  horarios,
+                  _docRef,
+                ),
               ),
               const SizedBox(height: 10),
 
@@ -363,22 +369,26 @@ class _ComercioDetallePageState extends State<ComercioDetallePage> {
                 },
               ),
               const SizedBox(height: 10),
-              FilledButton.tonalIcon(
-                icon: const Icon(Icons.inventory_2_outlined),
-                label: const Text('Ver stock'),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => StockPage(
-                        comercioId: widget.comercioId,
-                        comercioNombre: nombre,
+
+              // 🔒 Solo admins ven "Ver stock"
+              if (isAdmin)
+                FilledButton.tonalIcon(
+                  icon: const Icon(Icons.inventory_2_outlined),
+                  label: const Text('Ver stock'),
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => StockPage(
+                          comercioId: widget.comercioId,
+                          comercioNombre: nombre,
+                        ),
                       ),
-                    ),
-                  );
-                },
-              ),
-              const SizedBox(height: 10),
+                    );
+                  },
+                ),
+
+              if (isAdmin) const SizedBox(height: 10),
               OutlinedButton.icon(
                 icon: const Icon(Icons.directions_outlined),
                 label: const Text('Cómo llegar'),
@@ -630,7 +640,15 @@ class _HeaderCard extends StatelessWidget {
                         ),
                       ),
                     )
-                  : Image.network(fotoUrl!, fit: BoxFit.cover),
+                  : Image.network(
+                      fotoUrl!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Container(
+                        color: cs.surfaceVariant,
+                        alignment: Alignment.center,
+                        child: const Icon(Icons.image_not_supported_outlined),
+                      ),
+                    ),
             ),
             Positioned.fill(
               child: DecoratedBox(
@@ -911,12 +929,12 @@ class _HorariosRow extends StatelessWidget {
     if (rangoHoy.isNotEmpty) {
       displayText = rangoHoy;
     } else if (primerRango != null) {
-      final rawDias = primerRango!['dias'];
+      final rawDias = primerRango['dias'];
       final diasTxt = (rawDias is List)
           ? rawDias.map((e) => e.toString()).join(' · ')
           : (rawDias?.toString() ?? '');
-      final d = (primerRango!['desde'] ?? '').toString();
-      final a = (primerRango!['hasta'] ?? '').toString();
+      final d = (primerRango['desde'] ?? '').toString();
+      final a = (primerRango['hasta'] ?? '').toString();
       final rango = (d.isNotEmpty && a.isNotEmpty) ? '${_fmt(d)} – ${_fmt(a)}' : '';
       displayText = [if (diasTxt.isNotEmpty) diasTxt, if (rango.isNotEmpty) rango].join(' — ');
     } else {
@@ -985,6 +1003,9 @@ void _showHorariosSheet(
 ) {
   final cs = Theme.of(context).colorScheme;
 
+  // ✅ Determinar admin usando tu AdminState real
+  final isAdmin = AdminState.isAdmin(context);
+
   final safe = asMapDynamic(horarios) ?? <String, dynamic>{};
   final rangos = asListMapDynamic(safe['rangos']);
 
@@ -1005,7 +1026,8 @@ void _showHorariosSheet(
     backgroundColor: cs.surface,
     isScrollControlled: true,
     builder: (ctx) {
-      final List<Map<String, dynamic>> local = List<Map<String, dynamic>>.from(items);
+      final List<Map<String, dynamic>> local =
+          List<Map<String, dynamic>>.from(items);
 
       return StatefulBuilder(
         builder: (ctx, setLocal) {
@@ -1034,7 +1056,8 @@ void _showHorariosSheet(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('Horarios', style: Theme.of(context).textTheme.titleLarge),
+                  Text('Horarios',
+                      style: Theme.of(context).textTheme.titleLarge),
                   const SizedBox(height: 8),
 
                   if (local.isEmpty)
@@ -1063,7 +1086,9 @@ void _showHorariosSheet(
                           return Container(
                             decoration: BoxDecoration(
                               borderRadius: BorderRadius.circular(14),
-                              border: Border.all(color: cs.outlineVariant.withOpacity(.45)),
+                              border: Border.all(
+                                color: cs.outlineVariant.withOpacity(.45),
+                              ),
                             ),
                             child: ListTile(
                               leading: const Icon(Icons.schedule_outlined),
@@ -1073,7 +1098,7 @@ void _showHorariosSheet(
                                     ? '${_fmt(d)} – ${_fmt(a)}'
                                     : 'Sin rango',
                               ),
-                              trailing: kIsAdmin
+                              trailing: isAdmin
                                   ? PopupMenuButton<String>(
                                       onSelected: (v) async {
                                         if (v == 'edit') {
@@ -1083,8 +1108,10 @@ void _showHorariosSheet(
                                         }
                                       },
                                       itemBuilder: (_) => const [
-                                        PopupMenuItem(value: 'edit', child: Text('Editar')),
-                                        PopupMenuItem(value: 'del', child: Text('Eliminar')),
+                                        PopupMenuItem(
+                                            value: 'edit', child: Text('Editar')),
+                                        PopupMenuItem(
+                                            value: 'del', child: Text('Eliminar')),
                                       ],
                                     )
                                   : null,
@@ -1096,7 +1123,7 @@ void _showHorariosSheet(
 
                   const SizedBox(height: 12),
 
-                  if (kIsAdmin)
+                  if (isAdmin)
                     Row(
                       children: [
                         Expanded(
@@ -1123,13 +1150,14 @@ void _showHorariosSheet(
                                               })
                                           .toList(),
                                     },
-                                    'updatedAt': FieldValue.serverTimestamp(),
+                                    'updatedAt':
+                                        FieldValue.serverTimestamp(),
                                   });
                                   if (context.mounted) {
                                     Navigator.pop(ctx);
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(content: Text('Horarios guardados')),
-                                    );
+                                    ScaffoldMessenger.of(context)
+                                        .showSnackBar(const SnackBar(
+                                            content: Text('Horarios guardados')));
                                   }
                                 },
                         ),

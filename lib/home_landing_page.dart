@@ -1,61 +1,55 @@
-import 'package:flutter/material.dart';
+// lib/home_landing_page.dart
 import 'dart:async';
+import 'dart:ui';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-
-import 'widgets/social_links_card.dart';
-import 'comercios_page.dart' show ComerciosPage;      // ⬅️ solo la clase, no trae kIsAdmin
-import 'ofertas_page.dart' show OfertasPage;
-import 'admin_state.dart';                            // ⬅️ define adminMode y kIsAdmin globales
-import 'admin_panel_page.dart';
-import 'services/analytics_service.dart';
-import 'dart:ui';
+import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+
+import 'admin_panel_page.dart';
+import 'admin_state.dart'; // adminMode + AdminState
+import 'bebidas_page.dart';
+import 'comercios_page.dart' show ComerciosPage; // solo la clase
+import 'ofertas_page.dart' show OfertasPage;
 import 'promos_destacadas.dart';
+import 'services/analytics_service.dart';
 import 'widgets/animated_filter_chips.dart';
-import 'widgets/promo_ticker.dart';
+import 'widgets/glass_search_field.dart';
+import 'widgets/soft_decor.dart';
+import 'widgets/social_links_card.dart';
 
-class HomePage extends StatelessWidget {
-  const HomePage({super.key});
+/// PIN local para activar modo admin (podés cambiarlo o leerlo de RemoteConfig)
+const String ADMIN_PIN = String.fromEnvironment('ADMIN_PIN', defaultValue: '1234');
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Inicio')),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-        children: const [
-          SizedBox(height: 16),
-        ],
-      ),
-    );
-  }
-}
-
-// PIN de administrador (podés cambiarlo cuando quieras)
-const String kAdminPin = '1234';
-
-/// Asegura sesión y asigna rol admin en Firestore
+/// Si querés autenticar y setear rol admin en Firestore (opcional)
 Future<void> ensureSignedInAndPromoteToAdmin() async {
   final auth = FirebaseAuth.instance;
   if (auth.currentUser == null) {
     await auth.signInAnonymously();
   }
   final uid = auth.currentUser!.uid;
-
   await FirebaseFirestore.instance.collection('users').doc(uid).set(
-    {
-      'role': 'admin',
-      'updatedAt': FieldValue.serverTimestamp(),
-    },
+    {'role': 'admin', 'updatedAt': FieldValue.serverTimestamp()},
     SetOptions(merge: true),
   );
+}
+
+/// ===== Página “contenedora” mínima (no la toco) =====
+class HomePage extends StatelessWidget {
+  const HomePage({super.key});
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      appBar: null,
+      body: HomeLandingPage(),
+    );
+  }
 }
 
 /// ====================== HOME LANDING ======================
 class HomeLandingPage extends StatefulWidget {
   const HomeLandingPage({super.key});
-
   @override
   State<HomeLandingPage> createState() => _HomeLandingPageState();
 }
@@ -64,85 +58,73 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
   @override
   void initState() {
     super.initState();
-    // registra apertura de la app
-    AppAnalytics.appOpen();
+    AppAnalytics.appOpen(); // registro de apertura
   }
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
-return Scaffold(
-  body: CustomScrollView(
-    slivers: [
-      SliverAppBar.large(
-  expandedHeight: 220,
-  pinned: true,
-  backgroundColor: cs.surface,
-  flexibleSpace: FlexibleSpaceBar(
-    // En vez de usar title/titlePadding, armamos todo en el background
-    background: Stack(
-      fit: StackFit.expand,
-      children: [
-        // Fondo con gradiente que respeta el tema
-        DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                cs.primaryContainer,
-                cs.tertiaryContainer,
-              ],
+    return Scaffold(
+      body: CustomScrollView(
+        slivers: [
+          // ====== Encabezado grande con fondo + orbes + ola ======
+          SliverAppBar.large(
+            expandedHeight: 220,
+            pinned: true,
+            backgroundColor: cs.surface,
+            flexibleSpace: FlexibleSpaceBar(
+              background: Stack(
+                fit: StackFit.expand,
+                children: [
+                  // Gradiente base según tema
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [cs.primaryContainer, cs.tertiaryContainer],
+                      ),
+                    ),
+                  ),
+                  // Orbes suaves
+                  const SoftOrbs(),
+                  // Título + slogan
+                  Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Transform.scale(
+                          scale: 1.7,
+                          child: const DescabioLogoTitle(),
+                        ),
+                        const SizedBox(height: 10),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Text(
+                            'La mejor app para distribución de bebidas',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                  color: cs.onPrimaryContainer.withOpacity(.95),
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: .2,
+                                ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Ola inferior
+                  const BottomWave(height: 42),
+                ],
+              ),
             ),
           ),
-        ),
 
-        // Contenido centrado: logo + subtítulo
-        Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Hacemos el logo más grande con un scale
-              Transform.scale(
-                scale: 1.7, // ↔️ ajustá si lo querés aún más grande
-                child: const DescabioLogoTitle(),
-              ),
-              const SizedBox(height: 10),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Text(
-                  'La mejor app para distribución de bebidas',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        color: cs.onPrimaryContainer.withOpacity(.95),
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: .2,
-                      ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    ),
-  ),
-),
+          // Saludo con tarjeta
+          const SliverToBoxAdapter(child: GreetingHeader()),
 
-      const SliverToBoxAdapter(
-        child: GreetingHeader(),
-      ),
-
-      // …tus otros slivers aquí
-         
-
-
-  
-
-
- // ✅ solo acá va el ; porque termina el return
-
-          // -------- BANNER ADMIN ARRIBA (solo si adminMode = true) --------
+          // ===== Banner ADMIN (solo visible si adminMode = true) =====
           SliverToBoxAdapter(
             child: ValueListenableBuilder<bool>(
               valueListenable: adminMode,
@@ -151,8 +133,7 @@ return Scaffold(
                 return Padding(
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
                   child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     decoration: BoxDecoration(
                       color: cs.primary,
                       borderRadius: BorderRadius.circular(14),
@@ -174,15 +155,12 @@ return Scaffold(
                           style: TextButton.styleFrom(
                             foregroundColor: Colors.white,
                             backgroundColor: Colors.white.withOpacity(.18),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 6),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                           ),
                           onPressed: () {
                             adminMode.value = false;
-                            kIsAdmin = false;
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content: Text('Modo admin desactivado')),
+                              const SnackBar(content: Text('Modo admin desactivado')),
                             );
                           },
                           icon: const Icon(Icons.logout, size: 18),
@@ -196,50 +174,54 @@ return Scaffold(
             ),
           ),
 
-          // -------- Banner publicitario arriba del buscador --------
-           SliverToBoxAdapter(child: _HomePromoBanner()),
-                SliverToBoxAdapter(child:_GifPromoBanner()),
+          // ===== Banners publicitarios =====
+          const SliverToBoxAdapter(child: _HomePromoBanner()),
+          const SliverToBoxAdapter(child: _GifPromoBanner()),
 
-          // -------- Chips rápidos de promos --------
+          // ===== Chips de promos (abre la página de Ofertas) =====
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-              child: _PromoChipsRow(
-                onTapChip: (context) {
-                  Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => const OfertasPage()));
-                },
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(.06),
+                      blurRadius: 18,
+                      spreadRadius: -8,
+                      offset: const Offset(0, 10),
+                    ),
+                  ],
+                ),
+                child: _PromoChipsRow(
+                  onTapChip: (ctx) {
+                    Navigator.push(
+                      ctx,
+                      MaterialPageRoute(builder: (_) => const OfertasPage()),
+                    );
+                  },
+                ),
               ),
             ),
           ),
-          
 
-          // … por ejemplo después de los chips/promos
-           const SliverToBoxAdapter(child: SizedBox(height: 8)),
-            SliverToBoxAdapter(child: PromosDestacadas()),
+          // Promos destacadas
+          const SliverToBoxAdapter(child: SizedBox(height: 8)),
+          const SliverToBoxAdapter(child: PromosDestacadas()),
 
-          // -------- CONTENIDO ORIGINAL --------
+          // ===== Contenido principal =====
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Buscador
-                  TextField(
-                    readOnly: true,
+                  // Buscador que abre Comercios
+                  GlassSearchField(
+                    hintText: 'Provincia, ciudad o comercio',
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(builder: (_) => const ComerciosPage()),
-                    ),
-                    decoration: InputDecoration(
-                      hintText: 'Provincia, ciudad o comercio',
-                      prefixIcon: const Icon(Icons.search),
-                      filled: true,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: BorderSide.none,
-                      ),
                     ),
                   ),
                   const SizedBox(height: 24),
@@ -292,8 +274,7 @@ return Scaffold(
                             subtitle: 'Comercios · Ofertas · Stock · Finanzas',
                             onTap: () => Navigator.push(
                               context,
-                              MaterialPageRoute(
-                                  builder: (_) => const AdminPanelPage()),
+                              MaterialPageRoute(builder: (_) => const AdminPanelPage()),
                             ),
                           ),
                           const SizedBox(height: 24),
@@ -302,21 +283,23 @@ return Scaffold(
                     },
                   ),
 
-                  // ---- Redes sociales
+                  // Redes
                   const SizedBox(height: 16),
-Text(
-  'Seguinos en redes sociales',
-  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-),
-const SocialLinksCard(
-  facebookUrl: 'https://www.facebook.com/share/17JKBaM6Rs/',
-  instagramUrl: 'https://www.instagram.com/descabiooficial?igsh=MWVqdDByamI0Z2JnOQ==',
-  tiktokUrl: 'https://www.tiktok.com/@tu_usuario_tiktok',
- ),
+                  const Text(
+                    'Seguinos en redes sociales',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  const SocialLinksCard(
+                    facebookUrl: 'https://www.facebook.com/share/17JKBaM6Rs/',
+                    instagramUrl:
+                        'https://www.instagram.com/descabiooficial?igsh=MWVqdDByamI0Z2JnOQ==',
+                    tiktokUrl: 'https://www.tiktok.com/@tu_usuario_tiktok',
+                  ),
 
+                  const SizedBox(height: 12),
                   Center(
                     child: TextButton.icon(
-                      onPressed: () => _showAdminLogin(context),
+                      onPressed: () => showAdminLogin(context), // 👈 nombre exacto
                       icon: const Icon(Icons.lock_outline),
                       label: const Text('Soy administrador'),
                     ),
@@ -330,80 +313,113 @@ const SocialLinksCard(
     );
   }
 
-  // ========= LOGIN ADMIN por PIN =========
-  void _showAdminLogin(BuildContext context) {
-    if (adminMode.value == true || kIsAdmin) {
-      showModalBottomSheet(
-        context: context,
-        builder: (ctx) => SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const ListTile(
-                leading: Icon(Icons.verified_user_outlined),
-                title: Text('Sesión iniciada'),
-                subtitle: Text('Ya estás en modo administrador'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.logout),
-                title: const Text('Salir de administrador'),
-                onTap: () {
-                  adminMode.value = false;
-                  kIsAdmin = false;
-                  Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Modo admin desactivado')),
-                  );
-                },
-              ),
-            ],
-          ),
-        ),
-      );
-      return;
-    }
+  // ========= LOGIN ADMIN por PIN (BottomSheet) =========
+  void showAdminLogin(BuildContext context) {
+    final isAdmin = AdminState.isAdmin(context);
 
-    final pinCtrl = TextEditingController();
-    showDialog(
+    showModalBottomSheet(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Acceso administrador'),
-        content: TextField(
-          controller: pinCtrl,
-          obscureText: true,
-          decoration: const InputDecoration(
-            labelText: 'PIN',
-            prefixIcon: Icon(Icons.lock_outline),
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) {
+        // Ya está logueado como admin
+        if (isAdmin) {
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const ListTile(
+                    leading: Icon(Icons.verified_user_outlined),
+                    title: Text('Sesión iniciada'),
+                    subtitle: Text('Ya estás en modo administrador'),
+                  ),
+                  const SizedBox(height: 8),
+                  FilledButton.icon(
+                    icon: const Icon(Icons.logout),
+                    label: const Text('Salir de modo admin'),
+                    onPressed: () {
+                      adminMode.value = false;
+                      Navigator.pop(ctx);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Modo admin desactivado')),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        // Pedir PIN
+        final pinCtrl = TextEditingController();
+        return SafeArea(
+          child: Padding(
+            padding: EdgeInsets.only(
+              left: 16,
+              right: 16,
+              top: 8,
+              bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const ListTile(
+                  leading: Icon(Icons.lock_outline),
+                  title: Text('Ingresar PIN de administrador'),
+                  subtitle: Text('Sólo personal autorizado'),
+                ),
+                TextField(
+                  controller: pinCtrl,
+                  keyboardType: TextInputType.number,
+                  obscureText: true,
+                  maxLength: 6,
+                  decoration: const InputDecoration(
+                    labelText: 'PIN',
+                    prefixIcon: Icon(Icons.password),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text('Cancelar'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: FilledButton.icon(
+                        icon: const Icon(Icons.login),
+                        label: const Text('Acceder'),
+                        onPressed: () async {
+                          final pin = pinCtrl.text.trim();
+                          if (pin == ADMIN_PIN) {
+                            // Si querés asegurarte de tener un user y marcar admin en Firestore:
+                            // await ensureSignedInAndPromoteToAdmin();
+                            adminMode.value = true;
+                            Navigator.pop(ctx);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Modo admin activado')),
+                            );
+                          } else {
+                            ScaffoldMessenger.of(ctx).showSnackBar(
+                              const SnackBar(content: Text('PIN incorrecto')),
+                            );
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              final pin = pinCtrl.text.trim();
-              if (pin == kAdminPin) {
-                await ensureSignedInAndPromoteToAdmin();
-                adminMode.value = true;
-                kIsAdmin = true;
-                if (ctx.mounted) Navigator.pop(ctx);
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Modo admin activado')),
-                  );
-                }
-              } else {
-                ScaffoldMessenger.of(ctx).showSnackBar(
-                  const SnackBar(content: Text('PIN incorrecto')),
-                );
-              }
-            },
-            child: const Text('Entrar'),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -411,7 +427,6 @@ const SocialLinksCard(
 /// ===== Banner publicitario (carrusel) =====
 class _HomePromoBanner extends StatefulWidget {
   const _HomePromoBanner();
-
   @override
   State<_HomePromoBanner> createState() => _HomePromoBannerState();
 }
@@ -515,8 +530,8 @@ class _HomePromoBannerState extends State<_HomePromoBanner> {
                       borderRadius: BorderRadius.circular(999),
                     ),
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: List.generate(
@@ -538,7 +553,6 @@ class _HomePromoBannerState extends State<_HomePromoBanner> {
 class _Dot extends StatelessWidget {
   final bool active;
   const _Dot({required this.active});
-
   @override
   Widget build(BuildContext context) {
     return AnimatedContainer(
@@ -556,6 +570,34 @@ class _Dot extends StatelessWidget {
   }
 }
 
+/// ===== Carrusel de GIFs de promo =====
+class _GifPromoBanner extends StatelessWidget {
+  const _GifPromoBanner();
+  final _gifs = const [
+    'assets/gifs/beer_ad.gif',
+    'assets/gifs/drinks_offer.gif',
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 180,
+      child: PageView.builder(
+        itemCount: _gifs.length,
+        controller: PageController(viewportFraction: .9),
+        itemBuilder: (_, i) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: Image.asset(_gifs[i], fit: BoxFit.cover),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
 
 /// ===== Fila de chips promocionales =====
 class _PromoChipsRow extends StatelessWidget {
@@ -564,63 +606,18 @@ class _PromoChipsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
     return AnimatedFilterChips(
-  tags: const [
-    FilterTag(id: '2x1',   label: '2x1',          icon: Icons.local_drink_outlined),
-    FilterTag(id: 'happy', label: 'Happy Hour',   icon: Icons.schedule_outlined),
-    FilterTag(id: 'envio', label: 'Envío gratis', icon: Icons.local_shipping_outlined),
-  ],
-  onSelected: (tag) {
-    // seguís haciendo lo mismo que antes
-    onTapChip(context);
-
-    // si querés actuar distinto según el chip:
-    // if (tag.id == '2x1') { ... }
-    // else if (tag.id == 'happy') { ... }
-    // else if (tag.id == 'envio') { ... }
-  },
-);
-  }
-}
-
-class _PromoChip extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final Color color;
-  final VoidCallback onTap;
-
-  const _PromoChip({
-    required this.label,
-    required this.icon,
-    required this.color,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final onColor = Theme.of(context).colorScheme.onPrimaryContainer;
-    return Material(
-      color: color.withOpacity(.6),
-      borderRadius: BorderRadius.circular(999),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(999),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: Row(
-            children: [
-              Icon(icon, size: 18, color: onColor),
-              const SizedBox(width: 6),
-              Text(label, style: TextStyle(color: onColor)),
-            ],
-          ),
-        ),
-      ),
+      tags: const [
+        FilterTag(id: '2x1', label: '2x1', icon: Icons.local_drink_outlined),
+        FilterTag(id: 'happy', label: 'Happy Hour', icon: Icons.schedule_outlined),
+        FilterTag(id: 'envio', label: 'Envío gratis', icon: Icons.local_shipping_outlined),
+      ],
+      onSelected: (tag) => onTapChip(context),
     );
   }
 }
 
+/// ===== Card de acción =====
 class _ActionCard extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -657,11 +654,15 @@ class _ActionCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title,
-                        style: Theme.of(context).textTheme.titleMedium),
+                    Text(
+                      title,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
                     const SizedBox(height: 4),
-                    Text(subtitle,
-                        style: Theme.of(context).textTheme.bodySmall),
+                    Text(
+                      subtitle,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
                   ],
                 ),
               ),
@@ -673,7 +674,8 @@ class _ActionCard extends StatelessWidget {
     );
   }
 }
-// --- Header con saludo dinámico y fondo con gradiente ---
+
+/// --- Header con saludo dinámico y fondo con gradiente ---
 class GreetingHeader extends StatelessWidget {
   const GreetingHeader({super.key});
 
@@ -687,7 +689,6 @@ class GreetingHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final text = Theme.of(context).textTheme;
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 12),
@@ -718,16 +719,21 @@ class GreetingHeader extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(_greeting(),
-                    style: text.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: cs.onPrimaryContainer,
-                    )),
+                Text(
+                  _greeting(),
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w700, color: cs.onPrimaryContainer),
+                ),
                 const SizedBox(height: 4),
-                Text('Descubrí ofertas y bebidas cerca de vos',
-                    style: text.bodySmall?.copyWith(
-                      color: cs.onPrimaryContainer.withOpacity(.85),
-                    )),
+                Text(
+                  'Descubrí ofertas y bebidas cerca de vos',
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: cs.onPrimaryContainer.withOpacity(.85)),
+                ),
               ],
             ),
           ),
@@ -737,19 +743,13 @@ class GreetingHeader extends StatelessWidget {
   }
 }
 
-
-// --- Card con efecto “vidrio” (glassmorphism) ---
+/// --- Card con efecto “vidrio” (glassmorphism) ---
 class GlassCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry? padding;
   final VoidCallback? onTap;
 
-  const GlassCard({
-    super.key,
-    required this.child,
-    this.padding,
-    this.onTap,
-  });
+  const GlassCard({super.key, required this.child, this.padding, this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -764,10 +764,7 @@ class GlassCard extends StatelessWidget {
           decoration: BoxDecoration(
             color: base.withOpacity(isDark ? .08 : .06),
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: base.withOpacity(isDark ? .18 : .12),
-              width: 1,
-            ),
+            border: Border.all(color: base.withOpacity(isDark ? .18 : .12), width: 1),
           ),
           padding: padding ?? const EdgeInsets.all(16),
           child: child,
@@ -788,19 +785,17 @@ class GlassCard extends StatelessWidget {
   }
 }
 
-// Animación sutil de “presionado”
+/// Animación sutil de “presionado”
 class _TapScale extends StatefulWidget {
   final Widget child;
   final double scale;
   const _TapScale({required this.child, this.scale = .98});
-
   @override
   State<_TapScale> createState() => _TapScaleState();
 }
 
 class _TapScaleState extends State<_TapScale> {
   bool _down = false;
-
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
@@ -815,6 +810,8 @@ class _TapScaleState extends State<_TapScale> {
     );
   }
 }
+
+/// Logo animado del header
 class DescabioLogoTitle extends StatefulWidget {
   const DescabioLogoTitle({super.key});
   @override
@@ -823,17 +820,18 @@ class DescabioLogoTitle extends StatefulWidget {
 
 class _DescabioLogoTitleState extends State<DescabioLogoTitle>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 2200),
-  )..repeat(reverse: true);
+  late final AnimationController _c =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 2200))
+        ..repeat(reverse: true);
 
   late final Animation<double> _scale =
-      CurvedAnimation(parent: _c, curve: Curves.easeInOut)
-          .drive(Tween(begin: 0.96, end: 1.04));
+      CurvedAnimation(parent: _c, curve: Curves.easeInOut).drive(Tween(begin: 0.96, end: 1.04));
 
   @override
-  void dispose() { _c.dispose(); super.dispose(); }
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -860,36 +858,6 @@ class _DescabioLogoTitleState extends State<DescabioLogoTitle>
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-class _GifPromoBanner extends StatelessWidget {
-  final _gifs = const [
-    'assets/gifs/beer_ad.gif',
-    'assets/gifs/drinks_offer.gif',
-  ];
-
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 180,
-      child: PageView.builder(
-        itemCount: _gifs.length,
-        controller: PageController(viewportFraction: .9),
-        itemBuilder: (_, i) {
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: Image.asset(
-                _gifs[i],
-                fit: BoxFit.cover,
-              ),
-            ),
-          );
-        },
       ),
     );
   }

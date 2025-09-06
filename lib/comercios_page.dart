@@ -1,15 +1,62 @@
-// comercios_page.dart
+// lib/comercios_page.dart
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'dart:math' show sin, cos, atan2, sqrt, pi;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:path_provider/path_provider.dart';
+
 import 'comercio_detalle_page.dart';
 import 'bebidas_page.dart';
+import 'widgets/commerce_tile.dart';
 
-// Mostrar FAB de "agregar comercio"
-bool kIsAdmin = true; // ← ponelo en false si NO sos admin
+/// Mostrar FAB de "agregar comercio"
+const bool kIsAdmin = true; // si tenés admin_state, podés reemplazar esto por su flag
+
+/* ==========================
+   Persistencia simple de favoritos (archivo JSON local)
+   ========================== */
+class _FavStore {
+  Set<String> _ids = {};
+  File? _file;
+
+  Set<String> get ids => _ids;
+
+  Future<void> init() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      _file = File('${dir.path}/favs.json');
+      if (await _file!.exists()) {
+        final txt = await _file!.readAsString();
+        final data = (jsonDecode(txt) as List?) ?? const [];
+        _ids = data.map((e) => e.toString()).toSet();
+      } else {
+        _ids = {};
+      }
+    } catch (_) {
+      _ids = {};
+    }
+  }
+
+  Future<void> _persist() async {
+    try {
+      if (_file == null) return;
+      await _file!.writeAsString(jsonEncode(_ids.toList()));
+    } catch (_) {/* no-op */}
+  }
+
+  Future<void> toggle(String id) async {
+    if (_ids.contains(id)) {
+      _ids.remove(id);
+    } else {
+      _ids.add(id);
+    }
+    await _persist();
+  }
+}
 
 class ComerciosPage extends StatefulWidget {
   const ComerciosPage({super.key});
@@ -24,6 +71,7 @@ class _ComerciosPageState extends State<ComerciosPage> {
   bool _fAbierto = false;
   bool _fCerca = false;
   bool _fPromos = false;
+  bool _ordenDist = false; // ordenar por distancia
 
   // ---------- Ubicación ----------
   bool _locBusy = false;
@@ -34,10 +82,27 @@ class _ComerciosPageState extends State<ComerciosPage> {
   StreamSubscription<QuerySnapshot>? _promoSub;
   final Set<String> _comerciosConPromo = <String>{};
 
+  // ---------- Favoritos ----------
+  final _favStore = _FavStore();
+  Set<String> _favs = {};
+
   @override
   void initState() {
     super.initState();
     _listenPromos();
+    _initFavs();
+  }
+
+  Future<void> _initFavs() async {
+    await _favStore.init();
+    _favs = _favStore.ids;
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _toggleFav(String id) async {
+    await _favStore.toggle(id);
+    _favs = _favStore.ids;
+    if (mounted) setState(() {});
   }
 
   @override
@@ -47,7 +112,7 @@ class _ComerciosPageState extends State<ComerciosPage> {
     super.dispose();
   }
 
-  // ================== PROMOS ==================
+  /* ================== PROMOS ================== */
   void _listenPromos() {
     final hoy = DateTime.now();
     final inicioHoy = DateTime(hoy.year, hoy.month, hoy.day);
@@ -73,39 +138,38 @@ class _ComerciosPageState extends State<ComerciosPage> {
     });
   }
 
-  // ================== UBICACIÓN ==================
+  /* ================== UBICACIÓN ================== */
   Future<void> _ensureLocation() async {
     if (_lat != null && _lng != null) return;
     setState(() => _locBusy = true);
     try {
-      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        setState(() => _locBusy = false);
-        return;
+      final pos = await _getCurrentPosition();
+      if (pos != null) {
+        _lat = pos.latitude;
+        _lng = pos.longitude;
       }
+    } finally {
+      if (mounted) setState(() => _locBusy = false);
+    }
+  }
+
+  Future<Position?> _getCurrentPosition() async {
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) return null;
 
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) {
-          setState(() => _locBusy = false);
-          return;
-        }
+        if (permission == LocationPermission.denied) return null;
       }
-      if (permission == LocationPermission.deniedForever) {
-        setState(() => _locBusy = false);
-        return;
-      }
+      if (permission == LocationPermission.deniedForever) return null;
 
-      final pos = await Geolocator.getCurrentPosition(
+      return await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
       );
-      _lat = pos.latitude;
-      _lng = pos.longitude;
     } catch (_) {
-      // silencioso
-    } finally {
-      if (mounted) setState(() => _locBusy = false);
+      return null;
     }
   }
 
@@ -121,7 +185,7 @@ class _ComerciosPageState extends State<ComerciosPage> {
   }
   double _deg2rad(double d) => d * (pi / 180.0);
 
-  // ================== ABIERTO AHORA ==================
+  /* ================== ABIERTO AHORA ================== */
   String _diaHoyShort() {
     const map = {
       DateTime.monday: 'lun',
@@ -183,7 +247,7 @@ class _ComerciosPageState extends State<ComerciosPage> {
     return false;
   }
 
-  // ================== EDITOR HORARIO (ADMIN) ==================
+  /* ================== EDITOR HORARIO (ADMIN) ================== */
   Future<void> _editarHorarioSimple({
     required String comercioId,
     required Map<String, dynamic>? horariosActual,
@@ -352,55 +416,99 @@ class _ComerciosPageState extends State<ComerciosPage> {
     }
   }
 
-  // ================== CREAR COMERCIO (FAB) ==================
+  /* ================== CREAR COMERCIO (FAB) ================== */
   Future<void> _crearComercioRapido() async {
     final nombreCtrl = TextEditingController();
     final ciudadCtrl = TextEditingController();
     final provCtrl = TextEditingController();
 
+    double? lat;
+    double? lng;
+
     await showDialog<void>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Nuevo comercio'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(controller: nombreCtrl, decoration: const InputDecoration(labelText: 'Nombre')),
-            TextField(controller: ciudadCtrl, decoration: const InputDecoration(labelText: 'Ciudad')),
-            TextField(controller: provCtrl, decoration: const InputDecoration(labelText: 'Provincia')),
-            const SizedBox(height: 8),
-            if (_lat != null && _lng != null)
-              Text('Se guardará con ubicación actual: '
-                  '${_lat!.toStringAsFixed(5)}, ${_lng!.toStringAsFixed(5)}',
-                  style: Theme.of(context).textTheme.bodySmall),
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          title: const Text('Nuevo comercio'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nombreCtrl,
+                  decoration: const InputDecoration(labelText: 'Nombre'),
+                ),
+                TextField(
+                  controller: ciudadCtrl,
+                  decoration: const InputDecoration(labelText: 'Ciudad'),
+                ),
+                TextField(
+                  controller: provCtrl,
+                  decoration: const InputDecoration(labelText: 'Provincia'),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.my_location),
+                  label: const Text('Usar mi ubicación'),
+                  onPressed: () async {
+                    final pos = await _getCurrentPosition();
+                    if (pos == null) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('No se pudo obtener la ubicación')),
+                        );
+                      }
+                      return;
+                    }
+                    setLocal(() {
+                      lat = pos.latitude;
+                      lng = pos.longitude;
+                    });
+                  },
+                ),
+                const SizedBox(height: 6),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    (lat != null && lng != null)
+                        ? 'Ubicación: ${lat!.toStringAsFixed(5)}, ${lng!.toStringAsFixed(5)}'
+                        : 'Ubicación: (sin definir)',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                final nombre = nombreCtrl.text.trim();
+                if (nombre.isEmpty) return;
+                final now = FieldValue.serverTimestamp();
+                await FirebaseFirestore.instance.collection('comercios').add({
+                  'nombre': nombre,
+                  'ciudad': ciudadCtrl.text.trim(),
+                  'provincia': provCtrl.text.trim(),
+                  if (lat != null) 'lat': lat,
+                  if (lng != null) 'lng': lng,
+                  'createdAt': now,
+                  'updatedAt': now,
+                });
+                if (context.mounted) Navigator.pop(context);
+              },
+              child: const Text('Crear'),
+            ),
           ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
-          FilledButton(
-            onPressed: () async {
-              final nombre = nombreCtrl.text.trim();
-              if (nombre.isEmpty) return;
-              final now = FieldValue.serverTimestamp();
-              await FirebaseFirestore.instance.collection('comercios').add({
-                'nombre': nombre,
-                'ciudad': ciudadCtrl.text.trim(),
-                'provincia': provCtrl.text.trim(),
-                'lat': _lat,
-                'lng': _lng,
-                'createdAt': now,
-                'updatedAt': now,
-              });
-              if (context.mounted) Navigator.pop(context);
-            },
-            child: const Text('Crear'),
-          ),
-        ],
       ),
     );
   }
 
-  // ================== UI ==================
+  /* ================== UI ================== */
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -470,10 +578,22 @@ class _ComerciosPageState extends State<ComerciosPage> {
                   label: _locBusy ? 'Buscando...' : 'Cerca',
                   selected: _fCerca,
                   onTap: () async {
-                    if (!_fCerca) {
+                    if (!_fCerca || _lat == null || _lng == null) {
                       await _ensureLocation();
                     }
                     if (mounted) setState(() => _fCerca = !_fCerca);
+                  },
+                ),
+                const SizedBox(width: 8),
+                _ChipToggle(
+                  icon: Icons.swap_vert,
+                  label: 'Orden: distancia',
+                  selected: _ordenDist,
+                  onTap: () async {
+                    if (_lat == null || _lng == null) {
+                      await _ensureLocation();
+                    }
+                    setState(() => _ordenDist = !_ordenDist);
                   },
                 ),
                 const SizedBox(width: 8),
@@ -534,6 +654,27 @@ class _ComerciosPageState extends State<ComerciosPage> {
                   return true;
                 }).toList();
 
+                // Orden por distancia (si tenemos user loc)
+                if (_ordenDist && _lat != null && _lng != null) {
+                  filtered.sort((a, b) {
+                    final ma = a.data();
+                    final mb = b.data();
+                    final latA = (ma['lat'] as num?)?.toDouble();
+                    final lngA = (ma['lng'] as num?)?.toDouble();
+                    final latB = (mb['lat'] as num?)?.toDouble();
+                    final lngB = (mb['lng'] as num?)?.toDouble();
+
+                    double da = 1e9, db = 1e9;
+                    if (latA != null && lngA != null) {
+                      da = _distKm(_lat!, _lng!, latA, lngA);
+                    }
+                    if (latB != null && lngB != null) {
+                      db = _distKm(_lat!, _lng!, latB, lngB);
+                    }
+                    return da.compareTo(db);
+                  });
+                }
+
                 if (filtered.isEmpty) {
                   return Center(
                     child: Text('No hay comercios para mostrar.',
@@ -541,59 +682,73 @@ class _ComerciosPageState extends State<ComerciosPage> {
                   );
                 }
 
-                return ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                  itemCount: filtered.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 12),
-                  itemBuilder: (_, i) {
-                    final doc = filtered[i];
-                    final m = doc.data();
-
-                    final nombre = (m['nombre'] ?? '') as String? ?? '';
-                    final ciudad = (m['ciudad'] ?? '') as String? ?? '';
-                    final provincia = (m['provincia'] ?? '') as String? ?? '';
-                    final fotoUrl = m['fotoUrl'] as String?;
-                    final lat = (m['lat'] as num?)?.toDouble();
-                    final lng = (m['lng'] as num?)?.toDouble();
-                    final horarios = m['horarios'] as Map<String, dynamic>?;
-
-                    final subt = [
-                      if (ciudad.isNotEmpty) ciudad,
-                      if (provincia.isNotEmpty) provincia,
-                    ].join(' • ');
-
-                    double? distanciaKm;
-                    if (_fCerca && _lat != null && _lng != null && lat != null && lng != null) {
-                      distanciaKm = _distKm(_lat!, _lng!, lat, lng);
+                return RefreshIndicator(
+                  onRefresh: () async {
+                    if (_fCerca || _ordenDist) {
+                      _lat = null;
+                      _lng = null;
+                      await _ensureLocation();
                     }
-
-                    final abierto = isOpenNow(horarios);
-                    final tienePromo = _comerciosConPromo.contains(doc.id);
-
-                    return _CommerceCard(
-                      title: nombre,
-                      subtitle: subt,
-                      imageUrl: fotoUrl,
-                      abierto: abierto,
-                      distanciaKm: distanciaKm,
-                      promo: tienePromo,
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => ComercioDetallePage(comercioId: doc.id),
-                          ),
-                        );
-                      },
-                      onLongPress: kIsAdmin
-                          ? () => _showAdminSheet(
-                                comercioId: doc.id,
-                                comercioNombre: nombre,
-                                horariosActual: horarios,
-                              )
-                          : null,
-                    );
+                    setState(() {});
+                    await Future.delayed(const Duration(milliseconds: 300));
                   },
+                  child: ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                    itemCount: filtered.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 16),
+                    itemBuilder: (_, i) {
+                      final doc = filtered[i];
+                      final m = doc.data();
+
+                      final nombre = (m['nombre'] ?? '') as String? ?? '';
+                      final ciudad = (m['ciudad'] ?? '') as String? ?? '';
+                      final provincia = (m['provincia'] ?? '') as String? ?? '';
+                      final fotoUrl = m['fotoUrl'] as String?;
+                      final lat = (m['lat'] as num?)?.toDouble();
+                      final lng = (m['lng'] as num?)?.toDouble();
+                      final horarios = m['horarios'] as Map<String, dynamic>?;
+
+                      final subt = [
+                        if (ciudad.isNotEmpty) ciudad,
+                        if (provincia.isNotEmpty) provincia,
+                      ].join(' • ');
+
+                      double? distanciaKm;
+                      if ((_fCerca || _ordenDist) && _lat != null && _lng != null && lat != null && lng != null) {
+                        distanciaKm = _distKm(_lat!, _lng!, lat, lng);
+                      }
+
+                      final abierto = isOpenNow(horarios);
+                      final tienePromo = _comerciosConPromo.contains(doc.id);
+
+                      return CommerceTile(
+                        title: nombre.isEmpty ? 'Sin nombre' : nombre,
+                        subtitle: subt,
+                        imageUrl: fotoUrl,
+                        isOpen: abierto,
+                        hasPromo: tienePromo,
+                        distanceKm: distanciaKm,
+                        // ❤️ favoritos
+                        isFavorite: _favs.contains(doc.id),
+                        onToggleFavorite: () => _toggleFav(doc.id),
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => ComercioDetallePage(comercioId: doc.id),
+                            ),
+                          );
+                        },
+                        onLongPress: kIsAdmin
+                            ? () => _showAdminSheet(
+                                  comercioId: doc.id,
+                                  comercioNombre: nombre,
+                                  horariosActual: horarios,
+                                )
+                            : null,
+                      );
+                    },
+                  ),
                 );
               },
             ),
@@ -652,7 +807,7 @@ class _ComerciosPageState extends State<ComerciosPage> {
   }
 }
 
-// ================== Widgets auxiliares ==================
+/* ================== Widgets auxiliares ================== */
 
 class _ChipToggle extends StatelessWidget {
   const _ChipToggle({
@@ -692,165 +847,6 @@ class _ChipToggle extends StatelessWidget {
       ),
       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
       labelPadding: const EdgeInsets.symmetric(horizontal: 6),
-    );
-  }
-}
-
-class _CommerceCard extends StatelessWidget {
-  const _CommerceCard({
-    required this.title,
-    required this.subtitle,
-    required this.imageUrl,
-    required this.abierto,
-    required this.onTap,
-    this.onLongPress,
-    this.distanciaKm,
-    this.promo = false,
-  });
-
-  final String title;
-  final String subtitle;
-  final String? imageUrl;
-  final bool abierto;
-  final VoidCallback onTap;
-  final VoidCallback? onLongPress;
-  final double? distanciaKm;
-  final bool promo;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-
-    final estadoChip = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: abierto ? Colors.green.withOpacity(.12) : Colors.red.withOpacity(.12),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: (abierto ? Colors.green : Colors.red).withOpacity(.35)),
-      ),
-      child: Text(
-        abierto ? 'Abierto' : 'Cerrado',
-        style: TextStyle(
-          color: abierto ? Colors.green : Colors.red,
-          fontWeight: FontWeight.w800,
-          fontSize: 13,
-        ),
-      ),
-    );
-
-    return InkWell(
-      borderRadius: BorderRadius.circular(18),
-      onTap: onTap,
-      onLongPress: onLongPress,
-      child: Container(
-        decoration: BoxDecoration(
-          color: cs.surface,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: cs.outlineVariant.withOpacity(.35)),
-          boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(.05), blurRadius: 14, offset: const Offset(0, 6)),
-          ],
-        ),
-        padding: const EdgeInsets.all(14),
-        child: Row(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(14),
-              child: SizedBox(
-                width: 60,
-                height: 60,
-                child: (imageUrl == null || imageUrl!.isEmpty)
-                    ? Container(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [cs.primaryContainer, cs.secondaryContainer],
-                          ),
-                        ),
-                        child: Icon(Icons.store, color: cs.onPrimaryContainer),
-                      )
-                    : Image.network(imageUrl!, fit: BoxFit.cover),
-              ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 17.5, fontWeight: FontWeight.w800),
-                        ),
-                      ),
-                      if (promo)
-                        Container(
-                          margin: const EdgeInsets.only(left: 6),
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: cs.tertiaryContainer.withOpacity(.60),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(Icons.local_offer_outlined, size: 14, color: cs.onTertiaryContainer),
-                              const SizedBox(width: 4),
-                              Text('Promo',
-                                  style: TextStyle(
-                                    color: cs.onTertiaryContainer,
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 12.0,
-                                  )),
-                            ],
-                          ),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 3),
-                  if (subtitle.isNotEmpty)
-                    Text(
-                      subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: cs.onSurfaceVariant, fontSize: 14.0),
-                    ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                estadoChip,
-                if (distanciaKm != null) ...[
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: cs.primaryContainer.withOpacity(.55),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      '${distanciaKm!.toStringAsFixed(1)} km',
-                      style: TextStyle(
-                        color: cs.onPrimaryContainer,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

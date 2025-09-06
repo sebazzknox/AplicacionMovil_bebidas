@@ -426,7 +426,8 @@ Row(
         widget.filterComercioId;
     String? selectedComercioName;
 
-    if (selectedComercioId != null && selectedComercioId!.isNotEmpty) {
+    if ((selectedComercioId ?? '').isNotEmpty) {
+  // o equivalente: if (selectedComercioId?.isNotEmpty == true) { {
       try {
         final snap = await FirebaseFirestore.instance
             .collection('comercios')
