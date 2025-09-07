@@ -78,6 +78,9 @@ class _ComerciosPageState extends State<ComerciosPage> {
   double? _lat;
   double? _lng;
 
+  // Radio de “Cerca” (ajustable con long-press en el chip)
+  double _radioKm = 10;
+
   // ---------- Promos ----------
   StreamSubscription<QuerySnapshot>? _promoSub;
   final Set<String> _comerciosConPromo = <String>{};
@@ -508,6 +511,35 @@ class _ComerciosPageState extends State<ComerciosPage> {
     );
   }
 
+  /* ================== Selector de radio para "Cerca" ================== */
+  Future<void> _pickRadioKm() async {
+    final opciones = [3.0, 5.0, 10.0, 20.0, 50.0];
+    final sel = await showModalBottomSheet<double>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ListTile(
+              leading: Icon(Icons.near_me_outlined),
+              title: Text('Radio de “Cerca”'),
+              subtitle: Text('Filtrar comercios por distancia'),
+            ),
+            for (final km in opciones)
+              ListTile(
+                title: Text('${km.toStringAsFixed(0)} km'),
+                trailing: (_radioKm == km) ? const Icon(Icons.check) : null,
+                onTap: () => Navigator.pop(ctx, km),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (sel != null) setState(() => _radioKm = sel);
+  }
+
   /* ================== UI ================== */
   @override
   Widget build(BuildContext context) {
@@ -573,16 +605,22 @@ class _ComerciosPageState extends State<ComerciosPage> {
                   onTap: () => setState(() => _fAbierto = !_fAbierto),
                 ),
                 const SizedBox(width: 8),
-                _ChipToggle(
-                  icon: Icons.near_me_outlined,
-                  label: _locBusy ? 'Buscando...' : 'Cerca',
-                  selected: _fCerca,
-                  onTap: () async {
-                    if (!_fCerca || _lat == null || _lng == null) {
-                      await _ensureLocation();
-                    }
-                    if (mounted) setState(() => _fCerca = !_fCerca);
-                  },
+                // Long-press para elegir radio
+                GestureDetector(
+                  onLongPress: _pickRadioKm,
+                  child: _ChipToggle(
+                    icon: Icons.near_me_outlined,
+                    label: _locBusy
+                        ? 'Buscando...'
+                        : 'Cerca (${_radioKm.toStringAsFixed(0)} km)',
+                    selected: _fCerca,
+                    onTap: () async {
+                      if (!_fCerca || _lat == null || _lng == null) {
+                        await _ensureLocation();
+                      }
+                      if (mounted) setState(() => _fCerca = !_fCerca);
+                    },
+                  ),
                 ),
                 const SizedBox(width: 8),
                 _ChipToggle(
@@ -648,7 +686,7 @@ class _ComerciosPageState extends State<ComerciosPage> {
                     final lng = (m['lng'] as num?)?.toDouble();
                     if (lat == null || lng == null) return false;
                     final km = _distKm(_lat!, _lng!, lat, lng);
-                    if (km > 10) return false; // radio 10 km
+                    if (km > _radioKm) return false; // ← usa el radio elegido
                   }
 
                   return true;

@@ -18,6 +18,7 @@ import 'widgets/animated_filter_chips.dart';
 import 'widgets/glass_search_field.dart';
 import 'widgets/soft_decor.dart';
 import 'widgets/social_links_card.dart';
+import 'mapa_page.dart';
 
 /// PIN local para activar modo admin (podés cambiarlo o leerlo de RemoteConfig)
 const String ADMIN_PIN = String.fromEnvironment('ADMIN_PIN', defaultValue: '1234');
@@ -251,12 +252,11 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
                   _ActionCard(
                     icon: Icons.map_outlined,
                     title: 'Mapa',
-                    subtitle: 'Ver comercios en el mapa (próximamente)',
-                    onTap: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Mapa: próximamente ✨')),
-                      );
-                    },
+                    subtitle: 'Ver comercios en el mapa',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const MapaPage()),
+                    ),
                   ),
 
                   const SizedBox(height: 12),

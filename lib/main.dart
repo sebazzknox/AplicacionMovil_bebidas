@@ -12,10 +12,14 @@ import 'comercios_page.dart';
 import 'bebidas_page.dart';
 import 'admin_new_promo_page.dart';
 import 'theme.dart';
+import 'notifications.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
+  await Notifications.init();
+  
+  runApp(const MyApp());
 
   // Fechas localizadas
   await initializeDateFormatting('es_AR', null);
