@@ -1,12 +1,10 @@
 // lib/admin_stats_page.dart
-import 'dart:collection';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'dart:async';
 
 // 👉 Usá SIEMPRE la misma fuente de verdad para adminMode/kIsAdmin
-import 'admin_state.dart';
 
 class AdminStatsPage extends StatefulWidget {
   const AdminStatsPage({super.key});

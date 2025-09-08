@@ -152,7 +152,7 @@ class CommerceTile extends StatelessWidget {
   Widget _actionIcon(BuildContext context, IconData icon, VoidCallback onPressed) {
     final cs = Theme.of(context).colorScheme;
     return Material(
-      color: cs.surfaceVariant.withOpacity(.45),
+      color: cs.surfaceContainerHighest.withOpacity(.45),
       shape: const CircleBorder(),
       child: InkWell(
         customBorder: const CircleBorder(),

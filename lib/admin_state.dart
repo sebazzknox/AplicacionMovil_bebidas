@@ -6,8 +6,8 @@ final ValueNotifier<bool> adminMode = ValueNotifier<bool>(false);
 /// InheritedNotifier que propaga el estado de admin
 class AdminState extends InheritedNotifier<ValueNotifier<bool>> {
   // 🔧 NO const: el super recibe un notifier que no es constante
-  AdminState({super.key, required Widget child})
-      : super(notifier: adminMode, child: child);
+  AdminState({super.key, required super.child})
+      : super(notifier: adminMode);
 
   /// true/false si es admin (sin usar ValueListenableBuilder)
   static bool isAdmin(BuildContext context) =>

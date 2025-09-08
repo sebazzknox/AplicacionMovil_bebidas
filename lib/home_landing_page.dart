@@ -9,7 +9,6 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'admin_panel_page.dart';
 import 'admin_state.dart'; // adminMode + AdminState
-import 'bebidas_page.dart';
 import 'comercios_page.dart' show ComerciosPage; // solo la clase
 import 'ofertas_page.dart' show OfertasPage;
 import 'promos_destacadas.dart';
@@ -21,9 +20,10 @@ import 'widgets/social_links_card.dart';
 import 'mapa_page.dart';
 
 /// PIN local para activar modo admin (podés cambiarlo o leerlo de RemoteConfig)
-const String ADMIN_PIN = String.fromEnvironment('ADMIN_PIN', defaultValue: '1234');
+const String ADMIN_PIN = String.fromEnvironment('ADMIN_PIN', defaultValue: '123456');
 
-/// Si querés autenticar y setear rol admin en Firestore (opcional)
+/// (OPCIONAL) Firmarse anónimo y forzar rol admin en Firestore.
+/// La dejo por si querés usarla en algún flujo alternativo.
 Future<void> ensureSignedInAndPromoteToAdmin() async {
   final auth = FirebaseAuth.instance;
   if (auth.currentUser == null) {
@@ -31,9 +31,40 @@ Future<void> ensureSignedInAndPromoteToAdmin() async {
   }
   final uid = auth.currentUser!.uid;
   await FirebaseFirestore.instance.collection('users').doc(uid).set(
-    {'role': 'admin', 'updatedAt': FieldValue.serverTimestamp()},
+    {'role': 'admin', 'isAdmin': true, 'updatedAt': FieldValue.serverTimestamp()},
     SetOptions(merge: true),
   );
+}
+
+/// Login con la cuenta oficial de admin por email/clave y asegura flags en /users/{uid}
+Future<bool> _signInAdminAccountAndSetFlags(BuildContext context) async {
+  try {
+    // cerrar cualquier sesión previa (anónima u otra)
+    await FirebaseAuth.instance.signOut();
+
+    // iniciar sesión con la cuenta del admin (asegurate que exista en Firebase Auth)
+    await FirebaseAuth.instance.signInWithEmailAndPassword(
+      email: 'admin@hotmail.com',
+      password: '123456',
+    );
+
+    // setear rol/flag en el doc del usuario
+    final uid = FirebaseAuth.instance.currentUser!.uid;
+    await FirebaseFirestore.instance.collection('users').doc(uid).set({
+      'role': 'admin',
+      'isAdmin': true,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    return true;
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo iniciar sesión de admin: $e')),
+      );
+    }
+    return false;
+  }
 }
 
 /// ===== Página “contenedora” mínima (no la toco) =====
@@ -299,7 +330,7 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
                   const SizedBox(height: 12),
                   Center(
                     child: TextButton.icon(
-                      onPressed: () => showAdminLogin(context), // 👈 nombre exacto
+                      onPressed: () => showAdminLogin(context), // 👈 abre login admin
                       icon: const Icon(Icons.lock_outline),
                       label: const Text('Soy administrador'),
                     ),
@@ -398,13 +429,17 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
                         onPressed: () async {
                           final pin = pinCtrl.text.trim();
                           if (pin == ADMIN_PIN) {
-                            // Si querés asegurarte de tener un user y marcar admin en Firestore:
-                            // await ensureSignedInAndPromoteToAdmin();
-                            adminMode.value = true;
-                            Navigator.pop(ctx);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Modo admin activado')),
-                            );
+                            // 1) Loguea con la cuenta oficial y 2) setea flags admin en Firestore
+                            final ok = await _signInAdminAccountAndSetFlags(context);
+                            if (ok) {
+                              adminMode.value = true; // muestra UI admin
+                              if (context.mounted) {
+                                Navigator.pop(ctx);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Modo admin activado')),
+                                );
+                              }
+                            }
                           } else {
                             ScaffoldMessenger.of(ctx).showSnackBar(
                               const SnackBar(content: Text('PIN incorrecto')),
@@ -530,8 +565,7 @@ class _HomePromoBannerState extends State<_HomePromoBanner> {
                       borderRadius: BorderRadius.circular(999),
                     ),
                     child: Padding(
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: List.generate(

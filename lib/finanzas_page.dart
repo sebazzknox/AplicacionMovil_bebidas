@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:fl_chart/fl_chart.dart';
 
-import 'comercios_page.dart' show kIsAdmin;
+import 'admin_state.dart';
 
 class FinanzasPage extends StatefulWidget {
   const FinanzasPage({super.key});
@@ -60,106 +60,102 @@ class _FinanzasPageState extends State<FinanzasPage> {
     final mesLabel = _mesElegido == null
         ? 'Todos los meses'
         : DateFormat('MMMM yyyy', 'es').format(_mesElegido!);
+    final isAdmin = AdminState.isAdmin(context);
 
     return Scaffold(
       appBar: AppBar(
-  title: const Text('Finanzas'),
-  actions: [
-    IconButton(
-      tooltip: 'Exportar CSV',
-      onPressed: _exportarCsv,
-      icon: const Icon(Icons.file_download_outlined),
-    ),
-    IconButton(
-      tooltip: 'Elegir mes',
-      onPressed: _elegirMes,
-      icon: const Icon(Icons.calendar_month_outlined),
-    ),
-    const SizedBox(width: 4),
-  ],
-  bottom: PreferredSize(
-    preferredSize: const Size.fromHeight(110), // 🔹 menos alto
-    child: Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-      child: Column(
-        children: [
-          // 🔹 Scroll horizontal para que no se corte el segmented
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: SegmentedButton<String>(
-              segments: const [
-                ButtonSegment(
-                  value: 'resumen',
-                  icon: Icon(Icons.analytics_outlined),
-                  label: Text('Resumen'),
-                ),
-                ButtonSegment(
-                  value: 'ingresos',
-                  icon: Icon(Icons.trending_up),
-                  label: Text('Ingresos'),
-                ),
-                ButtonSegment(
-                  value: 'gastos',
-                  icon: Icon(Icons.trending_down),
-                  label: Text('Gastos'),
-                ),
-              ],
-              selected: {_tab},
-              onSelectionChanged: (s) =>
-                  setState(() => _tab = s.first),
-              multiSelectionEnabled: false,
-            ),
+        title: const Text('Finanzas'),
+        actions: [
+          IconButton(
+            tooltip: 'Exportar CSV',
+            onPressed: _exportarCsv,
+            icon: const Icon(Icons.file_download_outlined),
           ),
-          const SizedBox(height: 8),
-          // 🔹 Wrap para que los filtros bajen de línea si no entran
-          Wrap(
-            spacing: 8,
-            runSpacing: 4,
-            children: [
-              InputChip(
-                label: Text(_mesElegido == null
-                    ? 'Todos los meses'
-                    : DateFormat('MMMM yyyy', 'es').format(_mesElegido!)),
-                avatar: const Icon(Icons.filter_list),
-                onPressed: _elegirMes,
-              ),
-              _cargandoComercios
-                  ? const SizedBox(
-                      width: 100,
-                      child: LinearProgressIndicator(minHeight: 2))
-                  : DropdownButtonHideUnderline(
-                      child: DropdownButton<String?>(
-                        value: _comercioFiltroId,
-                        items: [
-                          const DropdownMenuItem<String?>(
-                            value: null,
-                            child: Text('Todos los comercios'),
-                          ),
-                          ..._comercios.map(
-                            (c) => DropdownMenuItem<String?>(
-                              value: c.id,
-                              child: Text(
-                                c.nombre.isEmpty ? c.id : c.nombre,
-                                overflow: TextOverflow.ellipsis,
-                              ),
+          IconButton(
+            tooltip: 'Elegir mes',
+            onPressed: _elegirMes,
+            icon: const Icon(Icons.calendar_month_outlined),
+          ),
+          const SizedBox(width: 4),
+        ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(110),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+            child: Column(
+              children: [
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: SegmentedButton<String>(
+                    segments: const [
+                      ButtonSegment(
+                        value: 'resumen',
+                        icon: Icon(Icons.analytics_outlined),
+                        label: Text('Resumen'),
+                      ),
+                      ButtonSegment(
+                        value: 'ingresos',
+                        icon: Icon(Icons.trending_up),
+                        label: Text('Ingresos'),
+                      ),
+                      ButtonSegment(
+                        value: 'gastos',
+                        icon: Icon(Icons.trending_down),
+                        label: Text('Gastos'),
+                      ),
+                    ],
+                    selected: {_tab},
+                    onSelectionChanged: (s) => setState(() => _tab = s.first),
+                    multiSelectionEnabled: false,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    InputChip(
+                      label: Text(mesLabel),
+                      avatar: const Icon(Icons.filter_list),
+                      onPressed: _elegirMes,
+                    ),
+                    _cargandoComercios
+                        ? const SizedBox(
+                            width: 100,
+                            child: LinearProgressIndicator(minHeight: 2))
+                        : DropdownButtonHideUnderline(
+                            child: DropdownButton<String?>(
+                              value: _comercioFiltroId,
+                              items: [
+                                const DropdownMenuItem<String?>(
+                                  value: null,
+                                  child: Text('Todos los comercios'),
+                                ),
+                                ..._comercios.map(
+                                  (c) => DropdownMenuItem<String?>(
+                                    value: c.id,
+                                    child: Text(
+                                      c.nombre.isEmpty ? c.id : c.nombre,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                              onChanged: (v) {
+                                setState(() => _comercioFiltroId = v);
+                              },
                             ),
                           ),
-                        ],
-                        onChanged: (v) {
-                          setState(() => _comercioFiltroId = v);
-                        },
-                      ),
-                    ),
-            ],
+                  ],
+                ),
+              ],
+            ),
           ),
-        ],
+        ),
       ),
-    ),
-  ),
-),
       body: _buildBody(),
 
-      floatingActionButton: kIsAdmin
+      floatingActionButton: isAdmin
           ? FloatingActionButton.extended(
               onPressed: () => _nuevoMovimiento(),
               label: Text(_tab == 'ingresos'
@@ -459,6 +455,8 @@ class _MovimientosList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isAdmin = AdminState.isAdmin(context);
+
     final desde = mesElegido;
     final hasta = mesElegido == null
         ? null
@@ -466,7 +464,7 @@ class _MovimientosList extends StatelessWidget {
 
     Query<Map<String, dynamic>> q =
         FirebaseFirestore.instance.collectionGroup('finanzas')
-          .where('tipo', isEqualTo: tipo);
+            .where('tipo', isEqualTo: tipo);
 
     if (comercioFiltroId != null) {
       q = q.where('comercioId', isEqualTo: comercioFiltroId);
@@ -489,21 +487,24 @@ class _MovimientosList extends StatelessWidget {
         }
         final docs = snap.data?.docs ?? [];
         if (docs.isEmpty) {
-         return _EmptyState(
-    title: 'Sin movimientos',
-    subtitle: 'No hay ${tipo == 'ingreso' ? 'ingresos' : 'gastos'} para el período o comercio seleccionado.',
-    ctaLabel: kIsAdmin ? 'Cargar movimiento' : null,
-    onCta: kIsAdmin ? () {
-      // Abrimos el diálogo de nuevo movimiento del padre vía ScaffoldMessenger
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Usá el botón “Nuevo mov.” para agregar uno')),
-      );
-    } : null,
-  );
-}
-        
+          return _EmptyState(
+            title: 'Sin movimientos',
+            subtitle:
+                'No hay ${tipo == 'ingreso' ? 'ingresos' : 'gastos'} para el período o comercio seleccionado.',
+            ctaLabel: isAdmin ? 'Cargar movimiento' : null,
+            onCta: isAdmin
+                ? () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                          content: Text('Usá el botón “Nuevo mov.” para agregar uno')),
+                    );
+                  }
+                : null,
+          );
+        }
 
-        final total = docs.fold<num>(0, (a, e) => a + ((e.data()['monto'] ?? 0) as num));
+        final total =
+            docs.fold<num>(0, (a, e) => a + ((e.data()['monto'] ?? 0) as num));
         final signo = tipo == 'ingreso' ? '+' : '-';
         final color = tipo == 'ingreso' ? Colors.green : Colors.red;
 
@@ -556,7 +557,7 @@ class _MovimientosList extends StatelessWidget {
                             '${tipo == 'ingreso' ? '+ ' : '- '}\$${monto.toStringAsFixed(2)}',
                             style: Theme.of(context).textTheme.titleSmall,
                           ),
-                          if (kIsAdmin)
+                          if (isAdmin)
                             PopupMenuButton<String>(
                               onSelected: (v) {
                                 if (v == 'edit') _editarMovimiento(context, docSnap);
@@ -569,7 +570,8 @@ class _MovimientosList extends StatelessWidget {
                             ),
                         ],
                       ),
-                      onLongPress: kIsAdmin ? () => _editarMovimiento(context, docSnap) : null,
+                      onLongPress:
+                          isAdmin ? () => _editarMovimiento(context, docSnap) : null,
                     ),
                   );
                 },
@@ -586,9 +588,12 @@ class _MovimientosList extends StatelessWidget {
     QueryDocumentSnapshot<Map<String, dynamic>> doc,
   ) async {
     final d = doc.data();
-    final conceptoCtrl = TextEditingController(text: (d['concepto'] ?? '').toString());
-    final montoCtrl = TextEditingController(text: (d['monto'] ?? 0).toString());
-    DateTime fecha = (d['fecha'] as Timestamp?)?.toDate() ?? DateTime.now();
+    final conceptoCtrl =
+        TextEditingController(text: (d['concepto'] ?? '').toString());
+    final montoCtrl =
+        TextEditingController(text: (d['monto'] ?? 0).toString());
+    DateTime fecha =
+        (d['fecha'] as Timestamp?)?.toDate() ?? DateTime.now();
 
     final ok = await showDialog<bool>(
           context: context,
@@ -600,7 +605,8 @@ class _MovimientosList extends StatelessWidget {
                 children: [
                   _tf(conceptoCtrl, 'Concepto', Icons.description_outlined),
                   _tf(montoCtrl, 'Monto', Icons.attach_money,
-                      keyboard: const TextInputType.numberWithOptions(decimal: true)),
+                      keyboard: const TextInputType.numberWithOptions(
+                          decimal: true)),
                   const SizedBox(height: 8),
                   InkWell(
                     borderRadius: BorderRadius.circular(12),
@@ -612,7 +618,8 @@ class _MovimientosList extends StatelessWidget {
                         lastDate: DateTime(2100, 1, 1),
                       );
                       if (picked != null) {
-                        fecha = DateTime(picked.year, picked.month, picked.day, fecha.hour, fecha.minute);
+                        fecha = DateTime(picked.year, picked.month, picked.day,
+                            fecha.hour, fecha.minute);
                       }
                     },
                     child: InputDecorator(
@@ -627,8 +634,12 @@ class _MovimientosList extends StatelessWidget {
               ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
-              FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Guardar')),
+              TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancelar')),
+              FilledButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Guardar')),
             ],
           ),
         ) ??
@@ -644,7 +655,8 @@ class _MovimientosList extends StatelessWidget {
     });
 
     // ignore: use_build_context_synchronously
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Movimiento actualizado')));
+    ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Movimiento actualizado')));
   }
 
   Future<void> _borrarMovimiento(
@@ -657,8 +669,12 @@ class _MovimientosList extends StatelessWidget {
             title: const Text('Eliminar movimiento'),
             content: const Text('¿Seguro que querés eliminarlo?'),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
-              FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Eliminar')),
+              TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancelar')),
+              FilledButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Eliminar')),
             ],
           ),
         ) ??
@@ -669,7 +685,8 @@ class _MovimientosList extends StatelessWidget {
     await doc.reference.delete();
 
     // ignore: use_build_context_synchronously
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Movimiento eliminado')));
+    ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Movimiento eliminado')));
   }
 }
 
@@ -685,7 +702,7 @@ class _ResumenFinanzas extends StatelessWidget {
   DateTime get _desde6m {
     final now = DateTime.now();
     return DateTime(now.year, now.month - 5, 1);
-  }
+    }
 
   @override
   Widget build(BuildContext context) {
@@ -696,7 +713,7 @@ class _ResumenFinanzas extends StatelessWidget {
 
     Query<Map<String, dynamic>> q =
         FirebaseFirestore.instance.collectionGroup('finanzas')
-          .where('fecha', isGreaterThanOrEqualTo: Timestamp.fromDate(desde));
+            .where('fecha', isGreaterThanOrEqualTo: Timestamp.fromDate(desde));
 
     if (comercioFiltroId != null) {
       q = q.where('comercioId', isEqualTo: comercioFiltroId);
@@ -714,13 +731,14 @@ class _ResumenFinanzas extends StatelessWidget {
           return const Center(child: CircularProgressIndicator());
         }
         final docs = snap.data?.docs ?? [];
-        final series = _acumularPorMes(docs, desde, meses: mesElegido == null ? 6 : 1);
+        final series =
+            _acumularPorMes(docs, desde, meses: mesElegido == null ? 6 : 1);
         if (series.isEmpty) {
-        return _EmptyState(
-        title: 'Sin datos',
-        subtitle: 'No hay movimientos en el período seleccionado.',
-  );
-}
+          return const _EmptyState(
+            title: 'Sin datos',
+            subtitle: 'No hay movimientos en el período seleccionado.',
+          );
+        }
 
         return ListView(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
@@ -757,20 +775,27 @@ class _ResumenFinanzas extends StatelessWidget {
                     ),
                   ),
                   titlesData: FlTitlesData(
-                    leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    leftTitles:
+                        const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    topTitles:
+                        const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    rightTitles:
+                        const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                     bottomTitles: AxisTitles(
                       sideTitles: SideTitles(
                         showTitles: true,
                         reservedSize: 36,
                         getTitlesWidget: (value, meta) {
                           final i = value.toInt();
-                          if (i < 0 || i >= series.length) return const SizedBox();
+                          if (i < 0 || i >= series.length) {
+                            return const SizedBox();
+                          }
                           return Padding(
                             padding: const EdgeInsets.only(top: 6),
-                            child: Text(series[i].labelShort,
-                                style: Theme.of(context).textTheme.bodySmall),
+                            child: Text(
+                              series[i].labelShort,
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
                           );
                         },
                       ),
@@ -941,8 +966,6 @@ class ListToCsvConverter {
     }
     return s;
   }
-
-  
 }
 
 class _EmptyState extends StatelessWidget {
@@ -974,7 +997,10 @@ class _EmptyState extends StatelessWidget {
             Text(
               subtitle,
               textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.outline),
+              style: Theme.of(context)
+                  .textTheme
+                  .bodyMedium
+                  ?.copyWith(color: cs.outline),
             ),
             if (ctaLabel != null && onCta != null) ...[
               const SizedBox(height: 16),

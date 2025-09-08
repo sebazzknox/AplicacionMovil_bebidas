@@ -7,9 +7,10 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
-import 'admin_state.dart' show adminMode; // adminMode (ValueNotifier<bool>)
-import 'comercios_page.dart' show kIsAdmin; // flag admin
+import 'admin_state.dart'; // adminMode (ValueNotifier<bool>)
+import 'comercios_page.dart'; // flag admin
 import 'ofertas_page.dart' show OfertasPage; // 👈 para navegar al listado de ofertas
+
 
 class BebidasPage extends StatefulWidget {
   const BebidasPage({
@@ -29,8 +30,8 @@ class _BebidasPageState extends State<BebidasPage> {
   final _busquedaCtrl = TextEditingController();
   String _q = '';
   String _cat = 'todas';           // 'todas' | 'cervezas'
-  bool _soloPromos = false;        // “Ofertas” (solo para el estado visual)
-  bool _mostrarInactivas = false;  // visible solo para admin
+  final bool _soloPromos = false;        // “Ofertas” (solo para el estado visual)
+  final bool _mostrarInactivas = false;  // visible solo para admin
 
   final _picker = ImagePicker();
   XFile? _fotoTmp;
@@ -250,7 +251,7 @@ class _BebidasPageState extends State<BebidasPage> {
                     const SizedBox(height: 8),
 
                     DropdownButtonFormField<String>(
-                      value: categorias.contains(categoria)
+                      initialValue: categorias.contains(categoria)
                           ? categoria
                           : 'cervezas',
                       items: categorias
@@ -429,7 +430,7 @@ class _BebidasPageState extends State<BebidasPage> {
     return ValueListenableBuilder<bool>(
       valueListenable: adminMode,
       builder: (context, isAdmin, _) {
-        final admin = kIsAdmin || isAdmin;
+        final admin = AdminState.isAdmin(context);
         final cs = Theme.of(context).colorScheme;
 
         return Scaffold(
@@ -611,7 +612,7 @@ class _BebidasPageState extends State<BebidasPage> {
                                   ),
                               ],
                             ),
-                            onLongPress: (kIsAdmin || isAdmin)
+                            onLongPress: admin
                                 ? () => _editarBebida(id, m)
                                 : null,
                           ),
@@ -624,7 +625,7 @@ class _BebidasPageState extends State<BebidasPage> {
             ],
           ),
           floatingActionButton:
-              (kIsAdmin || isAdmin) ? _FabNuevo(onTap: _nuevaBebida) : null,
+              admin ? _FabNuevo(onTap:_nuevaBebida) : null,
         );
       },
     );
@@ -653,7 +654,7 @@ class _Pill extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final bg = selected
         ? (tint ?? cs.primary).withOpacity(.18)
-        : cs.surfaceVariant.withOpacity(.45);
+        : cs.surfaceContainerHighest.withOpacity(.45);
     final fg = selected ? (tint ?? cs.primary) : cs.onSurfaceVariant;
 
     return Material(
@@ -712,7 +713,7 @@ class _Thumb extends StatelessWidget {
         height: 56,
         child: (url == null || url!.isEmpty)
             ? Container(
-                color: cs.surfaceVariant.withOpacity(.5),
+                color: cs.surfaceContainerHighest.withOpacity(.5),
                 child: Icon(Icons.local_drink, color: cs.onSurfaceVariant),
               )
             : Image.network(url!, fit: BoxFit.cover),

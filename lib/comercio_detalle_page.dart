@@ -644,7 +644,7 @@ class _HeaderCard extends StatelessWidget {
                       fotoUrl!,
                       fit: BoxFit.cover,
                       errorBuilder: (_, __, ___) => Container(
-                        color: cs.surfaceVariant,
+                        color: cs.surfaceContainerHighest,
                         alignment: Alignment.center,
                         child: const Icon(Icons.image_not_supported_outlined),
                       ),
@@ -1204,7 +1204,7 @@ Future<Map<String, dynamic>?> _pickRango(
       helpText: isDesde ? 'Hora de apertura' : 'Hora de cierre',
       builder: (ctx, child) {
         return MediaQuery(
-          data: MediaQuery.of(ctx!).copyWith(alwaysUse24HourFormat: true),
+          data: MediaQuery.of(ctx).copyWith(alwaysUse24HourFormat: true),
           child: child!,
         );
       },

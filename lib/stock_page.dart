@@ -2,7 +2,7 @@
 import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'comercios_page.dart' show kIsAdmin;
+import 'admin_state.dart';
 
 class StockPage extends StatefulWidget {
   final String comercioId;
@@ -18,7 +18,7 @@ class StockPage extends StatefulWidget {
 }
 
 class _StockPageState extends State<StockPage> with TickerProviderStateMixin {
-  late final TabController _tab;
+  TabController? _tab;
 
   CollectionReference<Map<String, dynamic>> get stockCol =>
       FirebaseFirestore.instance
@@ -33,20 +33,35 @@ class _StockPageState extends State<StockPage> with TickerProviderStateMixin {
           .collection('stock_solicitudes');
 
   @override
-  void initState() {
-    super.initState();
-    _tab = TabController(length: kIsAdmin ? 2 : 1, vsync: this);
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Crear/actualizar el TabController según el rol actual
+    final isAdmin = AdminState.isAdmin(context);
+    final len = isAdmin ? 2 : 1;
+    if (_tab == null || _tab!.length != len) {
+      _tab?.dispose();
+      _tab = TabController(length: len, vsync: this);
+    }
   }
 
   @override
   void dispose() {
-    _tab.dispose();
+    _tab?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final isAdmin = AdminState.isAdmin(context);
+
+    // En el primer build _tab puede ser null por el lifecycle. Mostramos algo simple.
+    if (_tab == null) {
+      return Scaffold(
+        appBar: AppBar(title: Text('Stock · ${widget.comercioNombre}')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -55,7 +70,7 @@ class _StockPageState extends State<StockPage> with TickerProviderStateMixin {
           controller: _tab,
           tabs: [
             const Tab(text: 'Inventario'),
-            if (kIsAdmin)
+            if (isAdmin)
               Tab(
                 child: _SolicitudesTabLabel(solCol: solCol),
               ),
@@ -66,24 +81,24 @@ class _StockPageState extends State<StockPage> with TickerProviderStateMixin {
         controller: _tab,
         children: [
           _InventarioTab(stockCol: stockCol, solCol: solCol),
-          if (kIsAdmin) _SolicitudesTab(stockCol: stockCol, solCol: solCol),
+          if (isAdmin) _SolicitudesTab(stockCol: stockCol, solCol: solCol),
         ],
       ),
-      floatingActionButton: _fab(context, cs),
+      floatingActionButton: _fab(context, cs, isAdmin),
     );
   }
 
-  Widget? _fab(BuildContext context, ColorScheme cs) {
+  Widget? _fab(BuildContext context, ColorScheme cs, bool isAdmin) {
     return FloatingActionButton.extended(
       onPressed: () {
-        if (kIsAdmin) {
+        if (isAdmin) {
           _abrirEditorItem(context);
         } else {
           _abrirSolicitudAlta(context);
         }
       },
-      icon: Icon(kIsAdmin ? Icons.add_box_outlined : Icons.send_outlined),
-      label: Text(kIsAdmin ? 'Nuevo ítem' : 'Solicitar alta'),
+      icon: Icon(isAdmin ? Icons.add_box_outlined : Icons.send_outlined),
+      label: Text(isAdmin ? 'Nuevo ítem' : 'Solicitar alta'),
     );
   }
 
@@ -235,6 +250,8 @@ class _InventarioTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isAdmin = AdminState.isAdmin(context);
+
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: stockCol.orderBy('nombre').snapshots(),
       builder: (context, snap) {
@@ -282,13 +299,13 @@ class _InventarioTab extends StatelessWidget {
                 trailing: Wrap(
                   spacing: 6,
                   children: [
-                    if (kIsAdmin)
+                    if (isAdmin)
                       IconButton(
                         tooltip: 'Editar',
                         icon: const Icon(Icons.edit_outlined),
                         onPressed: () => _mostrarEditorInline(context, d),
                       ),
-                    if (kIsAdmin)
+                    if (isAdmin)
                       IconButton(
                         tooltip: 'Borrar',
                         icon: const Icon(Icons.delete_outline),
@@ -297,7 +314,7 @@ class _InventarioTab extends StatelessWidget {
                           if (ok) await d.reference.delete();
                         },
                       ),
-                    if (!kIsAdmin)
+                    if (!isAdmin)
                       IconButton(
                         tooltip: 'Solicitar ajuste',
                         icon: const Icon(Icons.send_outlined),
@@ -427,6 +444,8 @@ class _SolicitudesTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isAdmin = AdminState.isAdmin(context);
+
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: solCol.orderBy('creadoAt', descending: true).snapshots(),
       builder: (context, snap) {
@@ -459,7 +478,7 @@ class _SolicitudesTab extends StatelessWidget {
                   : 'Ajuste: ${(data['itemId'] ?? '') as String}'),
               subtitle: Text(_subtituloSolicitud(data)),
               trailing: _chipEstado(context, estado),
-              onTap: kIsAdmin ? () => _aprobarORechazar(context, d) : null,
+              onTap: isAdmin ? () => _aprobarORechazar(context, d) : null,
             );
 
             return Material(

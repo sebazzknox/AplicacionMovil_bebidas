@@ -12,9 +12,9 @@ import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
-
+import 'package:firebase_auth/firebase_auth.dart';
 import 'comercio_detalle_page.dart';
-import 'comercios_page.dart' show kIsAdmin;
+import 'admin_state.dart';
 
 /* ───────────── Utils ───────────── */
 
@@ -109,9 +109,9 @@ class _OfertasPageState extends State<OfertasPage> {
           .snapshots()
           .listen((doc) {
         final m = doc.data() ?? {};
+        // Respetar SOLO el booleano isAdmin en Firestore
         final byBool = (m['isAdmin'] ?? false) == true;
-        final byRole = (m['role'] ?? '') == 'admin';
-        if (mounted) setState(() => _isAdminDoc = byBool || byRole);
+        if (mounted) setState(() => _isAdminDoc = byBool);
       });
     });
   }
@@ -145,8 +145,8 @@ class _OfertasPageState extends State<OfertasPage> {
     final baseCol = FirebaseFirestore.instance.collection('ofertas');
     final uid = _uid();
 
-    // ✅ UI de admin sólo si es admin en Firestore y además kIsAdmin está activo
-    final isAdminUI = _isAdminDoc && kIsAdmin;
+    // ✅ UI de admin: o bien el doc de Firestore dice isAdmin, o hay override en AdminState
+    final isAdminUI = _isAdminDoc || AdminState.isAdmin(context); // doc de Firestore o override
 
     return Scaffold(
       appBar: AppBar(
@@ -1118,7 +1118,7 @@ class _OfertasPageState extends State<OfertasPage> {
       return;
     }
 
-    double? _num(TextEditingController c) =>
+    double? num(TextEditingController c) =>
         double.tryParse(c.text.replaceAll(',', '.'));
 
     final payload = <String, dynamic>{
@@ -1132,8 +1132,8 @@ class _OfertasPageState extends State<OfertasPage> {
           : FieldValue.delete(),
       'fin':
           fin != null ? Timestamp.fromDate(fin!) : FieldValue.delete(),
-      'precioOriginal': _num(precioOCtrl),
-      'precioOferta': _num(precioFCtrl),
+      'precioOriginal': num(precioOCtrl),
+      'precioOferta': num(precioFCtrl),
       'stock': int.tryParse(stockCtrl.text),
       'activa': activa,
       'destacada': destacada,
@@ -1302,7 +1302,7 @@ class _SkeletonList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final base =
-        Theme.of(context).colorScheme.surfaceVariant.withOpacity(.35);
+        Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(.35);
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
       itemCount: 6,

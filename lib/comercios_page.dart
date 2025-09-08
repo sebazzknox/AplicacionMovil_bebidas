@@ -12,9 +12,9 @@ import 'package:path_provider/path_provider.dart';
 import 'comercio_detalle_page.dart';
 import 'bebidas_page.dart';
 import 'widgets/commerce_tile.dart';
-
-/// Mostrar FAB de "agregar comercio"
-const bool kIsAdmin = true; // si tenés admin_state, podés reemplazar esto por su flag
+import 'admin_state.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 
 /* ==========================
    Persistencia simple de favoritos (archivo JSON local)
@@ -65,6 +65,31 @@ class ComerciosPage extends StatefulWidget {
 }
 
 class _ComerciosPageState extends State<ComerciosPage> {
+  // ---------- Admin (desde Firestore) ----------
+  bool _isAdminDoc = false;
+  StreamSubscription<User?>? _authSub;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _userSub;
+
+  void _watchAdmin() {
+    _authSub = FirebaseAuth.instance.authStateChanges().listen((u) {
+      _userSub?.cancel();
+      if (u == null) {
+        if (mounted) setState(() => _isAdminDoc = false);
+        return;
+      }
+      _userSub = FirebaseFirestore.instance
+          .collection('users')
+          .doc(u.uid)
+          .snapshots()
+          .listen((doc) {
+        final m = doc.data() ?? {};
+        final byBool = (m['isAdmin'] ?? false) == true;
+        final byRole = (m['role'] ?? '') == 'admin';
+        if (mounted) setState(() => _isAdminDoc = byBool || byRole);
+      });
+    });
+  }
+
   // ---------- Filtros/UI ----------
   final _searchCtrl = TextEditingController();
   String _q = '';
@@ -78,7 +103,7 @@ class _ComerciosPageState extends State<ComerciosPage> {
   double? _lat;
   double? _lng;
 
-  // Radio de “Cerca” (ajustable con long-press en el chip)
+  // Radio de “Cerca”
   double _radioKm = 10;
 
   // ---------- Promos ----------
@@ -92,8 +117,18 @@ class _ComerciosPageState extends State<ComerciosPage> {
   @override
   void initState() {
     super.initState();
+    _watchAdmin();
     _listenPromos();
     _initFavs();
+  }
+
+  @override
+  void dispose() {
+    _authSub?.cancel();
+    _userSub?.cancel();
+    _searchCtrl.dispose();
+    _promoSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _initFavs() async {
@@ -108,13 +143,6 @@ class _ComerciosPageState extends State<ComerciosPage> {
     if (mounted) setState(() {});
   }
 
-  @override
-  void dispose() {
-    _searchCtrl.dispose();
-    _promoSub?.cancel();
-    super.dispose();
-  }
-
   /* ================== PROMOS ================== */
   void _listenPromos() {
     final hoy = DateTime.now();
@@ -127,7 +155,7 @@ class _ComerciosPageState extends State<ComerciosPage> {
         .listen((snap) {
       final s = <String>{};
       for (final d in snap.docs) {
-        final m = d.data() as Map<String, dynamic>;
+        final m = d.data();
         final id = (m['comercioId'] ?? '').toString();
         if (id.isNotEmpty) s.add(id);
       }
@@ -183,9 +211,10 @@ class _ComerciosPageState extends State<ComerciosPage> {
     final dLon = _deg2rad(lon2 - lon1);
     final a = sin(dLat / 2) * sin(dLat / 2) +
         cos(_deg2rad(lat1)) * cos(_deg2rad(lat2)) * sin(dLon / 2) * sin(dLon / 2);
-    final c = 2 * atan2(sqrt(a), sqrt(1 - a));
+    final c = 2 * atan2(sqrt(1 - a), sqrt(a));
     return R * c;
   }
+
   double _deg2rad(double d) => d * (pi / 180.0);
 
   /* ================== ABIERTO AHORA ================== */
@@ -281,11 +310,11 @@ class _ComerciosPageState extends State<ComerciosPage> {
 
     final diasSel = {for (final d in diasOrder) d: setIni.contains(d)};
 
-    TimeOfDay _parseHHmm(String s) {
+    TimeOfDay parseHHmm(String s) {
       final p = s.split(':');
       return TimeOfDay(hour: int.tryParse(p[0]) ?? 9, minute: int.tryParse(p[1]) ?? 0);
     }
-    String _fmt(TimeOfDay t) {
+    String fmt(TimeOfDay t) {
       final hh = t.hour.toString().padLeft(2, '0');
       final mm = t.minute.toString().padLeft(2, '0');
       return '$hh:$mm';
@@ -310,15 +339,15 @@ class _ComerciosPageState extends State<ComerciosPage> {
             ),
             child: StatefulBuilder(
               builder: (ctx, setLocal) {
-                Future<void> _pickLocal(bool d) async {
-                  final init = _parseHHmm(d ? desdeTxt : hastaTxt);
+                Future<void> pickLocal(bool d) async {
+                  final init = parseHHmm(d ? desdeTxt : hastaTxt);
                   final res = await showTimePicker(context: ctx, initialTime: init);
                   if (res != null) {
                     setLocal(() {
                       if (d) {
-                        desdeTxt = _fmt(res);
+                        desdeTxt = fmt(res);
                       } else {
-                        hastaTxt = _fmt(res);
+                        hastaTxt = fmt(res);
                       }
                     });
                   }
@@ -339,7 +368,7 @@ class _ComerciosPageState extends State<ComerciosPage> {
                           label: Text(d),
                           onSelected: (v) => setLocal(() => diasSel[d] = v),
                           selectedColor: cs.primaryContainer.withOpacity(.55),
-                          backgroundColor: cs.surfaceVariant.withOpacity(.45),
+                          backgroundColor: cs.surfaceContainerHighest.withOpacity(.45),
                           shape: StadiumBorder(
                             side: BorderSide(color: cs.outlineVariant.withOpacity(.35)),
                           ),
@@ -356,7 +385,7 @@ class _ComerciosPageState extends State<ComerciosPage> {
                       children: [
                         Expanded(
                           child: OutlinedButton.icon(
-                            onPressed: () => _pickLocal(true),
+                            onPressed: () => pickLocal(true),
                             icon: const Icon(Icons.access_time),
                             label: Text('Desde  $desdeTxt'),
                           ),
@@ -364,7 +393,7 @@ class _ComerciosPageState extends State<ComerciosPage> {
                         const SizedBox(width: 8),
                         Expanded(
                           child: OutlinedButton.icon(
-                            onPressed: () => _pickLocal(false),
+                            onPressed: () => pickLocal(false),
                             icon: const Icon(Icons.access_time),
                             label: Text('Hasta  $hastaTxt'),
                           ),
@@ -545,12 +574,14 @@ class _ComerciosPageState extends State<ComerciosPage> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
+    final isAdminUI = _isAdminDoc || AdminState.isAdmin(context);
+
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
         title: const Text('Lugares de venta', style: TextStyle(fontWeight: FontWeight.w700)),
       ),
-      floatingActionButton: kIsAdmin
+      floatingActionButton: AdminState.isAdmin(context)
           ? FloatingActionButton(
               onPressed: _crearComercioRapido,
               child: const Icon(Icons.add),
@@ -777,7 +808,7 @@ class _ComerciosPageState extends State<ComerciosPage> {
                             ),
                           );
                         },
-                        onLongPress: kIsAdmin
+                        onLongPress: AdminState.isAdmin(context)
                             ? () => _showAdminSheet(
                                   comercioId: doc.id,
                                   comercioNombre: nombre,
@@ -796,7 +827,7 @@ class _ComerciosPageState extends State<ComerciosPage> {
     );
   }
 
-  // Admin bottom sheet
+  // ======= Admin bottom sheet (con eliminar comercio) =======
   Future<void> _showAdminSheet({
     required String comercioId,
     required String comercioNombre,
@@ -806,6 +837,7 @@ class _ComerciosPageState extends State<ComerciosPage> {
       context: context,
       showDragHandle: true,
       builder: (_) {
+        final cs = Theme.of(context).colorScheme;
         return SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -837,11 +869,117 @@ class _ComerciosPageState extends State<ComerciosPage> {
                   );
                 },
               ),
+              const Divider(),
+              ListTile(
+                leading: Icon(Icons.delete_outline, color: cs.error),
+                title: Text('Eliminar comercio', style: TextStyle(color: cs.error)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _confirmarEliminarComercio(
+                    comercioId: comercioId,
+                    nombre: comercioNombre.isEmpty ? 'Este comercio' : comercioNombre,
+                  );
+                },
+              ),
             ],
           ),
         );
       },
     );
+  }
+
+  // ======= Confirmación y borrado en cascada =======
+  Future<void> _confirmarEliminarComercio({
+    required String comercioId,
+    required String nombre,
+  }) async {
+    final ok = await showDialog<bool>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Eliminar comercio'),
+            content: Text(
+              '¿Eliminar “$nombre”? Se borrarán horarios, bebidas y stock. '
+              'Esta acción no se puede deshacer.',
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+              FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Eliminar')),
+            ],
+          ),
+        ) ??
+        false;
+
+    if (!ok) return;
+
+    try {
+      await _deleteComercioCascade(comercioId);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Comercio eliminado')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No se pudo eliminar: $e')));
+    }
+  }
+
+  Future<void> _deleteComercioCascade(String cid) async {
+    final fs = FirebaseFirestore.instance;
+    final docRef = fs.collection('comercios').doc(cid);
+
+    // Borrar archivos en Storage si guardás rutas
+    try {
+      final snap = await docRef.get();
+      final data = snap.data() as Map<String, dynamic>?;
+      final paths = <String>[
+        if ((data?['fotoPath'] ?? '').toString().isNotEmpty) data!['fotoPath'],
+        if ((data?['logoPath'] ?? '').toString().isNotEmpty) data!['logoPath'],
+        if ((data?['bannerPath'] ?? '').toString().isNotEmpty) data!['bannerPath'],
+      ];
+      for (final p in paths) {
+        try {
+          await FirebaseStorage.instance.ref().child(p).delete();
+        } catch (_) {}
+      }
+    } catch (_) {}
+
+    // Subcolecciones del comercio
+    await _deleteCollection(docRef.collection('horarios'));
+    await _deleteCollection(docRef.collection('bebidas'));
+    await _deleteCollection(docRef.collection('stock'));
+    await _deleteCollection(docRef.collection('ofertas')); // si existe
+
+    // Ofertas globales que referencian a este comercio
+    try {
+      while (true) {
+        final q = await fs
+            .collection('ofertas')
+            .where('comercioId', isEqualTo: cid)
+            .limit(50)
+            .get();
+        if (q.docs.isEmpty) break;
+        final batch = fs.batch();
+        for (final d in q.docs) {
+          batch.delete(d.reference);
+        }
+        await batch.commit();
+      }
+    } catch (_) {}
+
+    // Doc del comercio
+    await docRef.delete();
+  }
+
+  Future<void> _deleteCollection(CollectionReference<Map<String, dynamic>> ref,
+      {int batchSize = 50}) async {
+    QuerySnapshot<Map<String, dynamic>> q;
+    do {
+      q = await ref.limit(batchSize).get();
+      if (q.docs.isEmpty) break;
+      final batch = FirebaseFirestore.instance.batch();
+      for (final d in q.docs) {
+        batch.delete(d.reference);
+      }
+      await batch.commit();
+    } while (q.docs.length == batchSize);
   }
 }
 
@@ -879,7 +1017,7 @@ class _ChipToggle extends StatelessWidget {
         ),
       ),
       selectedColor: cs.primaryContainer.withOpacity(.55),
-      backgroundColor: cs.surfaceVariant.withOpacity(.45),
+      backgroundColor: cs.surfaceContainerHighest.withOpacity(.45),
       shape: StadiumBorder(
         side: BorderSide(color: cs.outlineVariant.withOpacity(.35)),
       ),

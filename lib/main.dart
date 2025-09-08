@@ -5,21 +5,22 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:google_fonts/google_fonts.dart';
-
-import 'admin_state.dart';
+import 'admin_gate.dart';        // ⬅️ usamos el gate centralizado de admin
 import 'splash_screen.dart';
 import 'comercios_page.dart';
 import 'bebidas_page.dart';
 import 'admin_new_promo_page.dart';
-import 'theme.dart';
 import 'notifications.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+
+  // Firebase (en Android alcanza con google-services.json)
   await Firebase.initializeApp();
+
+  // Notificaciones (FCM + permisos, canales, etc.)
   await Notifications.init();
-  
-  runApp(const MyApp());
 
   // Fechas localizadas
   await initializeDateFormatting('es_AR', null);
@@ -28,10 +29,10 @@ Future<void> main() async {
   FirebaseFirestore.instance.settings =
       const Settings(persistenceEnabled: true);
 
-  // ⚙️ Modo admin (cambiar a true solo cuando quieras permisos)
-  adminMode.value = false;
+  // Habilitar watcher de admin (lee users/{uid}.role == "admin" o isAdmin == true)
+  installAdminGate();
 
-  runApp( AdminState(child: MyApp()));
+  runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
@@ -86,9 +87,8 @@ class MyApp extends StatelessWidget {
           final args = (settings.arguments as Map?) ?? {};
           final comercioId =
               (args['comercioId'] ?? args['initialComercioId']) as String?;
-          final comercioNombre = (args['comercioNombre'] ??
-                  args['initialComercioNombre'] ??
-                  '') as String;
+          final comercioNombre =
+              (args['comercioNombre'] ?? args['initialComercioNombre'] ?? '') as String;
 
           if (comercioId == null || comercioId.isEmpty) {
             return MaterialPageRoute(
