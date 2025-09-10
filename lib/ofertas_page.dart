@@ -1145,7 +1145,7 @@ class _OfertasPageState extends State<OfertasPage> {
 
     try {
       if (isEdit) {
-        await doc!.reference.update(payload);
+        await doc.reference.update(payload);
 
         if (_fotoTmp != null) {
           await _deleteFotoByPath(data?['fotoPath'] as String?);

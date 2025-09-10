@@ -16,6 +16,11 @@ import 'admin_state.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 
+// ⬇️ Para mini-mapa y geocodificación
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart' as ll;
+import 'package:http/http.dart' as http;
+
 /* ==========================
    Persistencia simple de favoritos (archivo JSON local)
    ========================== */
@@ -114,6 +119,10 @@ class _ComerciosPageState extends State<ComerciosPage> {
   final _favStore = _FavStore();
   Set<String> _favs = {};
 
+  // Tiles para mini-map
+  static const String _cartoTiles =
+      'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+
   @override
   void initState() {
     super.initState();
@@ -211,7 +220,7 @@ class _ComerciosPageState extends State<ComerciosPage> {
     final dLon = _deg2rad(lon2 - lon1);
     final a = sin(dLat / 2) * sin(dLat / 2) +
         cos(_deg2rad(lat1)) * cos(_deg2rad(lat2)) * sin(dLon / 2) * sin(dLon / 2);
-    final c = 2 * atan2(sqrt(1 - a), sqrt(a));
+    final c = 2 * atan2(sqrt(a), sqrt(1 - a));
     return R * c;
   }
 
@@ -453,67 +462,162 @@ class _ComerciosPageState extends State<ComerciosPage> {
     final nombreCtrl = TextEditingController();
     final ciudadCtrl = TextEditingController();
     final provCtrl = TextEditingController();
+    final dirCtrl = TextEditingController();
 
     double? lat;
     double? lng;
+    bool buscando = false;
 
     await showDialog<void>(
       context: context,
       builder: (_) => StatefulBuilder(
         builder: (ctx, setLocal) => AlertDialog(
+          insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+          contentPadding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
           title: const Text('Nuevo comercio'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: nombreCtrl,
-                  decoration: const InputDecoration(labelText: 'Nombre'),
-                ),
-                TextField(
-                  controller: ciudadCtrl,
-                  decoration: const InputDecoration(labelText: 'Ciudad'),
-                ),
-                TextField(
-                  controller: provCtrl,
-                  decoration: const InputDecoration(labelText: 'Provincia'),
-                ),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.my_location),
-                  label: const Text('Usar mi ubicación'),
-                  onPressed: () async {
-                    final pos = await _getCurrentPosition();
-                    if (pos == null) {
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('No se pudo obtener la ubicación')),
-                        );
-                      }
-                      return;
-                    }
-                    setLocal(() {
-                      lat = pos.latitude;
-                      lng = pos.longitude;
-                    });
-                  },
-                ),
-                const SizedBox(height: 6),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    (lat != null && lng != null)
-                        ? 'Ubicación: ${lat!.toStringAsFixed(5)}, ${lng!.toStringAsFixed(5)}'
-                        : 'Ubicación: (sin definir)',
-                    style: Theme.of(context).textTheme.bodySmall,
+          // ⬇️ Clave para evitar los errores de IntrinsicWidth/Height
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: nombreCtrl,
+                    decoration: const InputDecoration(labelText: 'Nombre'),
                   ),
-                ),
-              ],
+                  TextField(
+                    controller: ciudadCtrl,
+                    decoration: const InputDecoration(labelText: 'Ciudad'),
+                  ),
+                  TextField(
+                    controller: provCtrl,
+                    decoration: const InputDecoration(labelText: 'Provincia'),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: dirCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Dirección (calle, número, ciudad)',
+                      prefixIcon: Icon(Icons.place_outlined),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.search),
+                        label: Text(buscando ? 'Buscando...' : 'Buscar dirección'),
+                        onPressed: buscando
+                            ? null
+                            : () async {
+                                final q = dirCtrl.text.trim();
+                                if (q.isEmpty) return;
+                                setLocal(() => buscando = true);
+                                final res = await _geocodeAddress(q);
+                                setLocal(() => buscando = false);
+                                if (res == null) {
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('No se encontró la dirección')),
+                                    );
+                                  }
+                                  return;
+                                }
+                                setLocal(() {
+                                  lat = (res['lat'] as num).toDouble();
+                                  lng = (res['lng'] as num).toDouble();
+                                });
+                              },
+                      ),
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.map_outlined),
+                        label: const Text('Elegir en mapa'),
+                        onPressed: () async {
+                          final picked = await _openMiniMapPicker(
+                            init: (lat != null && lng != null) ? ll.LatLng(lat!, lng!) : null,
+                          );
+                          if (picked != null) {
+                            setLocal(() {
+                              lat = picked.latitude;
+                              lng = picked.longitude;
+                            });
+                          }
+                        },
+                      ),
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.my_location),
+                        label: const Text('Usar mi ubicación'),
+                        onPressed: () async {
+                          final pos = await _getCurrentPosition();
+                          if (pos == null) {
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('No se pudo obtener la ubicación')),
+                              );
+                            }
+                            return;
+                          }
+                          setLocal(() {
+                            lat = pos.latitude;
+                            lng = pos.longitude;
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      (lat != null && lng != null)
+                          ? 'Ubicación: ${lat!.toStringAsFixed(5)}, ${lng!.toStringAsFixed(5)}'
+                          : 'Ubicación: (sin definir)',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  if (lat != null && lng != null)
+                    SizedBox(
+                      height: 160,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: FlutterMap(
+                          options: MapOptions(
+                            initialCenter: ll.LatLng(lat!, lng!),
+                            initialZoom: 15,
+                            interactionOptions: const InteractionOptions(
+                              flags: InteractiveFlag.pinchZoom | InteractiveFlag.drag,
+                            ),
+                          ),
+                          children: [
+                            TileLayer(
+                              urlTemplate: _cartoTiles,
+                              subdomains: const ['a', 'b', 'c', 'd'],
+                              userAgentPackageName: 'com.descabio.app',
+                            ),
+                            MarkerLayer(markers: [
+                              Marker(
+                                point: ll.LatLng(lat!, lng!),
+                                width: 40,
+                                height: 40,
+                                child: Icon(Icons.location_on,
+                                    color: Theme.of(ctx).colorScheme.primary, size: 36),
+                              ),
+                            ]),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.of(ctx).pop(), // usa el ctx del diálogo
               child: const Text('Cancelar'),
             ),
             FilledButton(
@@ -530,13 +634,41 @@ class _ComerciosPageState extends State<ComerciosPage> {
                   'createdAt': now,
                   'updatedAt': now,
                 });
-                if (context.mounted) Navigator.pop(context);
+                if (context.mounted) Navigator.of(ctx).pop();
               },
               child: const Text('Crear'),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  // === Geocodificación simple con Nominatim ===
+  Future<Map<String, dynamic>?> _geocodeAddress(String query) async {
+    try {
+      final uri = Uri.parse(
+          'https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${Uri.encodeComponent(query)}');
+      final res = await http.get(uri, headers: {
+        'User-Agent': 'Descabio/1.0 (contact: app)',
+      });
+      if (res.statusCode != 200) return null;
+      final list = jsonDecode(res.body) as List<dynamic>;
+      if (list.isEmpty) return null;
+      final m = list.first as Map<String, dynamic>;
+      final lat = double.tryParse((m['lat'] ?? '').toString());
+      final lon = double.tryParse((m['lon'] ?? '').toString());
+      if (lat == null || lon == null) return null;
+      return {'lat': lat, 'lng': lon, 'display': (m['display_name'] ?? '').toString()};
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // === Picker en pantalla completa (evita “sheet” en blanco)
+  Future<ll.LatLng?> _openMiniMapPicker({ll.LatLng? init}) async {
+    return Navigator.of(context).push<ll.LatLng>(
+      MaterialPageRoute(builder: (_) => _PickOnMapPage(initial: init)),
     );
   }
 
@@ -928,7 +1060,7 @@ class _ComerciosPageState extends State<ComerciosPage> {
     // Borrar archivos en Storage si guardás rutas
     try {
       final snap = await docRef.get();
-      final data = snap.data() as Map<String, dynamic>?;
+      final data = snap.data();
       final paths = <String>[
         if ((data?['fotoPath'] ?? '').toString().isNotEmpty) data!['fotoPath'],
         if ((data?['logoPath'] ?? '').toString().isNotEmpty) data!['logoPath'],
@@ -1023,6 +1155,130 @@ class _ChipToggle extends StatelessWidget {
       ),
       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
       labelPadding: const EdgeInsets.symmetric(horizontal: 6),
+    );
+  }
+}
+
+/* ================== Página de selección en mapa ================== */
+class _PickOnMapPage extends StatefulWidget {
+  final ll.LatLng? initial;
+  const _PickOnMapPage({this.initial});
+
+  @override
+  State<_PickOnMapPage> createState() => _PickOnMapPageState();
+}
+
+class _PickOnMapPageState extends State<_PickOnMapPage> {
+  final _ctrl = MapController();
+  ll.LatLng? _point;
+  bool _locating = false;
+
+  static const String _tileUrl =
+      'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+
+  @override
+  void initState() {
+    super.initState();
+    _point = widget.initial;
+    if (_point == null) _ensureLoc();
+  }
+
+  Future<void> _ensureLoc() async {
+    setState(() => _locating = true);
+    try {
+      final service = await Geolocator.isLocationServiceEnabled();
+      if (!service) return;
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+        if (perm == LocationPermission.denied) return;
+      }
+      if (perm == LocationPermission.deniedForever) return;
+
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+      setState(() {
+        _point = ll.LatLng(pos.latitude, pos.longitude);
+      });
+      if (_point != null) {
+        _ctrl.move(_point!, 15);
+      }
+    } catch (_) {} finally {
+      if (mounted) setState(() => _locating = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final init = _point ?? const ll.LatLng(-34.6037, -58.3816);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Elegí la ubicación'),
+        actions: [
+          TextButton.icon(
+            onPressed: _point == null
+                ? null
+                : () => Navigator.pop(context, _point),
+            icon: const Icon(Icons.check),
+            label: const Text('Confirmar'),
+          ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          FlutterMap(
+            mapController: _ctrl,
+            options: MapOptions(
+              initialCenter: init,
+              initialZoom: 14,
+              interactionOptions:
+                  const InteractionOptions(flags: InteractiveFlag.all),
+              onTap: (_, p) => setState(() => _point = p),
+              onLongPress: (_, p) => setState(() => _point = p),
+            ),
+            children: [
+              TileLayer(
+                urlTemplate: _tileUrl,
+                subdomains: const ['a', 'b', 'c', 'd'],
+                userAgentPackageName: 'com.descabio.app',
+                maxZoom: 19,
+              ),
+              if (_point != null)
+                MarkerLayer(markers: [
+                  Marker(
+                    width: 40,
+                    height: 40,
+                    point: _point!,
+                    child: const Icon(Icons.location_on,
+                        size: 38, color: Color(0xFF6C4ED2)),
+                  ),
+                ]),
+            ],
+          ),
+
+          // Botón mi ubicación
+          Positioned(
+            bottom: 20,
+            right: 16,
+            child: Material(
+              color: cs.primaryContainer,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              elevation: 4,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: _ensureLoc,
+                child: const SizedBox(
+                  width: 52, height: 52,
+                  child: Icon(Icons.my_location_outlined),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
