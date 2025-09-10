@@ -189,11 +189,16 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
                             backgroundColor: Colors.white.withOpacity(.18),
                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                           ),
-                          onPressed: () {
+                          onPressed: () async {
+                            // Desactiva UI admin y cierra sesión Firebase
                             adminMode.value = false;
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Modo admin desactivado')),
-                            );
+                            try { await FirebaseAuth.instance.signOut(); } catch (_) {}
+                            try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Sesión admin cerrada')),
+                              );
+                            }
                           },
                           icon: const Icon(Icons.logout, size: 18),
                           label: const Text('Salir'),
@@ -370,12 +375,16 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
                   FilledButton.icon(
                     icon: const Icon(Icons.logout),
                     label: const Text('Salir de modo admin'),
-                    onPressed: () {
+                    onPressed: () async {
                       adminMode.value = false;
-                      Navigator.pop(ctx);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Modo admin desactivado')),
-                      );
+                      try { await FirebaseAuth.instance.signOut(); } catch (_) {}
+                      try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+                      if (ctx.mounted) Navigator.pop(ctx);
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Sesión admin cerrada')),
+                        );
+                      }
                     },
                   ),
                 ],

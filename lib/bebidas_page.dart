@@ -1,6 +1,5 @@
 // lib/bebidas_page.dart
 import 'dart:io';
-import 'dart:math' show min;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -8,7 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import 'admin_state.dart'; // adminMode (ValueNotifier<bool>)
-import 'comercios_page.dart'; // flag admin
+// flag admin
 import 'ofertas_page.dart' show OfertasPage; // 👈 para navegar al listado de ofertas
 
 

@@ -145,8 +145,8 @@ class _OfertasPageState extends State<OfertasPage> {
     final baseCol = FirebaseFirestore.instance.collection('ofertas');
     final uid = _uid();
 
-    // ✅ UI de admin: o bien el doc de Firestore dice isAdmin, o hay override en AdminState
-    final isAdminUI = _isAdminDoc || AdminState.isAdmin(context); // doc de Firestore o override
+    // ✅ Admin UI solo si el doc de Firestore dice isAdmin: true
+    final isAdminUI = _isAdminDoc;
 
     return Scaffold(
       appBar: AppBar(
@@ -451,7 +451,7 @@ class _OfertasPageState extends State<OfertasPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // ⬇️ CORREGIDO: lista directa de widgets (sin bloque {})
+                          // ⬇️ lista directa de widgets
                           Row(
                             children: [
                               Expanded(
