@@ -18,6 +18,7 @@ import 'widgets/glass_search_field.dart';
 import 'widgets/soft_decor.dart';
 import 'widgets/social_links_card.dart';
 import 'mapa_page.dart';
+import 'mayoristas_page.dart' show MayoristasPage;
 
 /// PIN local para activar modo admin (podés cambiarlo o leerlo de RemoteConfig)
 const String ADMIN_PIN = String.fromEnvironment('ADMIN_PIN', defaultValue: '123456');
@@ -293,8 +294,21 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
                       context,
                       MaterialPageRoute(builder: (_) => const MapaPage()),
                     ),
-                  ),
 
+                    
+                  ),
+                  // ...debajo del _ActionCard de "Mapa"
+                  const SizedBox(height: 12),
+
+                   _ActionCard(
+                   icon: Icons.inventory_2_outlined,
+                   title: 'Mayoristas',
+                   subtitle: 'Distribuidores y ventas por volumen',
+                   onTap: () => Navigator.push(
+                   context,
+                   MaterialPageRoute(builder: (_) => const MayoristasPage()),
+                  ),
+                  ),
                   const SizedBox(height: 12),
 
                   // Panel visible SOLO si admin activo
