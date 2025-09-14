@@ -7,6 +7,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'auth/auth_gate.dart';        // ⬅️ para volver al login tras logout
+import 'splash_screen.dart';         // ⬅️ pantalla inicial dentro del AuthGate
+
 import 'admin_panel_page.dart';
 import 'admin_state.dart'; // adminMode + AdminState
 import 'comercios_page.dart' show ComerciosPage; // solo la clase
@@ -19,6 +22,7 @@ import 'widgets/soft_decor.dart';
 import 'widgets/social_links_card.dart';
 import 'mapa_page.dart';
 import 'mayoristas_page.dart' show MayoristasPage;
+import 'credencial_page.dart';
 
 /// PIN local para activar modo admin (podés cambiarlo o leerlo de RemoteConfig)
 const String ADMIN_PIN = String.fromEnvironment('ADMIN_PIN', defaultValue: '123456');
@@ -94,6 +98,19 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
     AppAnalytics.appOpen(); // registro de apertura
   }
 
+  // ⬇️ Logout con “reset” de navegación para volver al AuthGate
+  Future<void> _logout(BuildContext context) async {
+    adminMode.value = false; // apagamos UI admin por las dudas
+    try {
+      await FirebaseAuth.instance.signOut();
+    } catch (_) {}
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const AuthGate(home: SplashScreen())),
+      (_) => false,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -106,6 +123,34 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
             expandedHeight: 220,
             pinned: true,
             backgroundColor: cs.surface,
+            actions: [
+              IconButton(
+                tooltip: 'Cerrar sesión',
+                icon: const Icon(Icons.logout),
+                onPressed: () async {
+                  final ok = await showDialog<bool>(
+                    context: context,
+                    builder: (_) => AlertDialog(
+                      title: const Text('Cerrar sesión'),
+                      content: const Text('¿Seguro que querés salir de tu cuenta?'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context, false),
+                          child: const Text('Cancelar'),
+                        ),
+                        FilledButton(
+                          onPressed: () => Navigator.pop(context, true),
+                          child: const Text('Cerrar sesión'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (ok == true) {
+                    await _logout(context); // 👈 vuelve a AuthGate (login/registro)
+                  }
+                },
+              ),
+            ],
             flexibleSpace: FlexibleSpaceBar(
               background: Stack(
                 fit: StackFit.expand,
@@ -156,7 +201,6 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
 
           // Saludo con tarjeta
           const SliverToBoxAdapter(child: GreetingHeader()),
-
           // ===== Banner ADMIN (solo visible si adminMode = true) =====
           SliverToBoxAdapter(
             child: ValueListenableBuilder<bool>(
@@ -191,15 +235,7 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                           ),
                           onPressed: () async {
-                            // Desactiva UI admin y cierra sesión Firebase
-                            adminMode.value = false;
-                            try { await FirebaseAuth.instance.signOut(); } catch (_) {}
-                            try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Sesión admin cerrada')),
-                              );
-                            }
+                            await _logout(context); // 👈 mismo flujo
                           },
                           icon: const Icon(Icons.logout, size: 18),
                           label: const Text('Salir'),
@@ -294,22 +330,31 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
                       context,
                       MaterialPageRoute(builder: (_) => const MapaPage()),
                     ),
-
-                    
                   ),
-                  // ...debajo del _ActionCard de "Mapa"
+
                   const SizedBox(height: 12),
 
-                   _ActionCard(
-                   icon: Icons.inventory_2_outlined,
-                   title: 'Mayoristas',
-                   subtitle: 'Distribuidores y ventas por volumen',
-                   onTap: () => Navigator.push(
-                   context,
-                   MaterialPageRoute(builder: (_) => const MayoristasPage()),
+                  _ActionCard(
+                    icon: Icons.inventory_2_outlined,
+                    title: 'Mayoristas',
+                    subtitle: 'Distribuidores y ventas por volumen',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const MayoristasPage()),
+                    ),
                   ),
-                  ),
+
                   const SizedBox(height: 12),
+
+                  _ActionCard(
+                    icon: Icons.badge_outlined,
+                    title: 'Mi credencial',
+                    subtitle: 'Descuentos y QR',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const CredencialPage()),
+                    ),
+                  ),
 
                   // Panel visible SOLO si admin activo
                   ValueListenableBuilder<bool>(
@@ -347,13 +392,7 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
                   ),
 
                   const SizedBox(height: 12),
-                  Center(
-                    child: TextButton.icon(
-                      onPressed: () => showAdminLogin(context), // 👈 abre login admin
-                      icon: const Icon(Icons.lock_outline),
-                      label: const Text('Soy administrador'),
-                    ),
-                  ),
+                  // 🔥 Se eliminó el botón "Soy administrador"
                 ],
               ),
             ),
@@ -363,7 +402,7 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
     );
   }
 
-  // ========= LOGIN ADMIN por PIN (BottomSheet) =========
+  // ========= (Queda el método showAdminLogin definido más abajo si lo necesitás a futuro) =========
   void showAdminLogin(BuildContext context) {
     final isAdmin = AdminState.isAdmin(context);
 
@@ -392,7 +431,6 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
                     onPressed: () async {
                       adminMode.value = false;
                       try { await FirebaseAuth.instance.signOut(); } catch (_) {}
-                      try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
                       if (ctx.mounted) Navigator.pop(ctx);
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -452,10 +490,9 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
                         onPressed: () async {
                           final pin = pinCtrl.text.trim();
                           if (pin == ADMIN_PIN) {
-                            // 1) Loguea con la cuenta oficial y 2) setea flags admin en Firestore
                             final ok = await _signInAdminAccountAndSetFlags(context);
                             if (ok) {
-                              adminMode.value = true; // muestra UI admin
+                              adminMode.value = true;
                               if (context.mounted) {
                                 Navigator.pop(ctx);
                                 ScaffoldMessenger.of(context).showSnackBar(

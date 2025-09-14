@@ -8,6 +8,8 @@ import 'comercios_page.dart' show ComerciosPage;
 import 'ofertas_page.dart' show OfertasPage;
 import 'stock_page.dart';
 import 'finanzas_page.dart';
+// ✅ NUEVO: import del admin de credenciales
+import 'credenciales_admin_page.dart' show CredencialesAdminPage;
 
 class AdminPanelPage extends StatelessWidget {
   const AdminPanelPage({super.key});
@@ -145,6 +147,18 @@ class AdminPanelPage extends StatelessWidget {
                     MaterialPageRoute(builder: (_) => const AdminStatsPage()),
                   ),
                 ),
+
+                // ✅ NUEVO: tarjeta de Credenciales
+                _AdminTile(
+                  icon: Icons.badge_outlined,
+                  title: 'Credenciales',
+                  subtitle: 'Emitir y gestionar',
+                  enabled: isAdmin,
+                  onTap: (ctx) => Navigator.push(
+                    ctx,
+                    MaterialPageRoute(builder: (_) => const CredencialesAdminPage()),
+                  ),
+                ),
               ],
             ),
           ),
@@ -190,6 +204,18 @@ class AdminPanelPage extends StatelessWidget {
                 Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => const OfertasPage()),
+                );
+              },
+            ),
+            // ✅ NUEVO: acceso rápido a Credenciales
+            ListTile(
+              leading: const Icon(Icons.badge_outlined),
+              title: const Text('Gestionar Credenciales'),
+              onTap: () {
+                Navigator.pop(ctx);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const CredencialesAdminPage()),
                 );
               },
             ),

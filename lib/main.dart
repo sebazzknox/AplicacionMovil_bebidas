@@ -5,7 +5,12 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'admin_gate.dart';        // ⬅️ usamos el gate centralizado de admin
+
+// ⬇️ Traemos SOLO lo que usamos (evita choques de nombres)
+import 'admin_gate.dart' show installAdminGate, adminStream;
+import 'admin_state.dart' show adminMode, AdminState;
+import 'auth/auth_gate.dart';
+
 import 'splash_screen.dart';
 import 'comercios_page.dart';
 import 'bebidas_page.dart';
@@ -15,24 +20,38 @@ import 'notifications.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-
-  // Firebase (en Android alcanza con google-services.json)
   await Firebase.initializeApp();
-
-  // Notificaciones (FCM + permisos, canales, etc.)
   await Notifications.init();
-
-  // Fechas localizadas
   await initializeDateFormatting('es_AR', null);
 
-  // Firestore offline cache
   FirebaseFirestore.instance.settings =
       const Settings(persistenceEnabled: true);
 
-  // Habilitar watcher de admin (lee users/{uid}.role == "admin" o isAdmin == true)
+  // 🔒 Arranca el watcher que mira users/{uid} y emite si es admin.
   installAdminGate();
 
-  runApp(const MyApp());
+  // ⬅️ Sincronizamos el stream con el ValueNotifier que usa la UI
+  adminStream.listen((isAdmin) {
+    adminMode.value = isAdmin;
+    // Debug útil para verificar que entra:
+    // ignore: avoid_print
+    print('[adminGate] isAdmin=$isAdmin  uid=${FirebaseFirestore.instance.app.name}');
+  });
+
+  runApp(const _Root());
+}
+
+class _Root extends StatelessWidget {
+  const _Root({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    // Envolvemos toda la app con AdminState por si en algún lado usan
+    // AdminState.isAdmin(context). Igual la UI también escucha adminMode.
+    return AdminState(
+      child: const MyApp(),
+    );
+  }
 }
 
 class MyApp extends StatelessWidget {
@@ -40,7 +59,6 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Tema base con Poppins
     final light = ThemeData(
       useMaterial3: true,
       colorSchemeSeed: const Color(0xFF6F4BC7),
@@ -58,7 +76,6 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Bebidas App',
-
       theme: light,
       darkTheme: dark,
       themeMode: ThemeMode.light,
@@ -72,31 +89,30 @@ class MyApp extends StatelessWidget {
         GlobalCupertinoLocalizations.delegate,
       ],
 
-      // Pantalla inicial
-      home: const SplashScreen(),
+      // Gate: si no hay sesión -> AuthPage; si hay -> Splash + flujo normal
+      home: AuthGate(home: const SplashScreen()),
 
-      // Rutas simples
       routes: {
         '/comercios': (_) => const ComerciosPage(),
         '/admin/nueva-promo': (_) => const AdminNewPromoPage(),
       },
 
-      // Rutas con argumentos
       onGenerateRoute: (settings) {
         if (settings.name == '/bebidas') {
           final args = (settings.arguments as Map?) ?? {};
           final comercioId =
               (args['comercioId'] ?? args['initialComercioId']) as String?;
           final comercioNombre =
-              (args['comercioNombre'] ?? args['initialComercioNombre'] ?? '') as String;
+              (args['comercioNombre'] ??
+                      args['initialComercioNombre'] ??
+                      '') as String;
 
           if (comercioId == null || comercioId.isEmpty) {
             return MaterialPageRoute(
               builder: (_) => Scaffold(
                 appBar: AppBar(title: const Text('Bebidas')),
-                body: const Center(
-                  child: Text('Falta el comercioId para abrir Bebidas'),
-                ),
+                body:
+                    const Center(child: Text('Falta el comercioId para abrir Bebidas')),
               ),
             );
           }
