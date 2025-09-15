@@ -8,8 +8,10 @@ import 'comercios_page.dart' show ComerciosPage;
 import 'ofertas_page.dart' show OfertasPage;
 import 'stock_page.dart';
 import 'finanzas_page.dart';
-// ✅ NUEVO: import del admin de credenciales
+// ✅ Import del admin de credenciales
 import 'credenciales_admin_page.dart' show CredencialesAdminPage;
+// ✅ Import del editor de beneficios por credencial
+import 'widgets/credential_benefits_editor.dart';
 
 class AdminPanelPage extends StatelessWidget {
   const AdminPanelPage({super.key});
@@ -148,7 +150,7 @@ class AdminPanelPage extends StatelessWidget {
                   ),
                 ),
 
-                // ✅ NUEVO: tarjeta de Credenciales
+                // Gestión general de credenciales
                 _AdminTile(
                   icon: Icons.badge_outlined,
                   title: 'Credenciales',
@@ -158,6 +160,15 @@ class AdminPanelPage extends StatelessWidget {
                     ctx,
                     MaterialPageRoute(builder: (_) => const CredencialesAdminPage()),
                   ),
+                ),
+
+                // ✅ NUEVO: configurar descuentos por credencial en un comercio
+                _AdminTile(
+                  icon: Icons.discount_outlined,
+                  title: 'Descuentos por credencial',
+                  subtitle: 'Configurar por comercio',
+                  enabled: isAdmin,
+                  onTap: (ctx) => _openCredencialesEditor(ctx),
                 ),
               ],
             ),
@@ -207,7 +218,6 @@ class AdminPanelPage extends StatelessWidget {
                 );
               },
             ),
-            // ✅ NUEVO: acceso rápido a Credenciales
             ListTile(
               leading: const Icon(Icons.badge_outlined),
               title: const Text('Gestionar Credenciales'),
@@ -219,13 +229,22 @@ class AdminPanelPage extends StatelessWidget {
                 );
               },
             ),
+            // ✅ Acceso rápido al editor de descuentos por comercio
+            ListTile(
+              leading: const Icon(Icons.discount_outlined),
+              title: const Text('Descuentos por credencial (comercio)'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _openCredencialesEditor(context);
+              },
+            ),
           ],
         ),
       ),
     );
   }
 
-  // ---------- Selector de comercio para Stock ----------
+  // ---------- Selector de comercio para Stock / Editor ----------
   Future<Map<String, String>?> _pickComercio(BuildContext parentCtx) async {
     return await showModalBottomSheet<Map<String, String>>(
       context: parentCtx,
@@ -279,6 +298,86 @@ class AdminPanelPage extends StatelessWidget {
                       );
                     },
                   ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ---------- NUEVO: Editor de beneficios por credencial ----------
+  Future<void> _openCredencialesEditor(BuildContext context) async {
+    // 1) Elegir comercio
+    final picked = await _pickComercio(context);
+    if (picked == null) return;
+
+    final comercioId = picked['id']!;
+    final comercioNombre = picked['nombre']!;
+
+    // 2) Leer valores actuales del comercio
+    final ref = FirebaseFirestore.instance.collection('comercios').doc(comercioId);
+    final snap = await ref.get();
+    final data = snap.data() ?? {};
+
+    final acepta = (data['aceptaCredencial'] ?? false) == true;
+    final beneficios = (data['beneficios'] as Map<String, dynamic>?);
+
+    // 3) Mostrar editor embebido
+    final key = GlobalKey<CredentialBenefitsEditorState>();
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) {
+        final bottomInset = MediaQuery.of(ctx).viewInsets.bottom;
+        return SafeArea(
+          child: Padding(
+            padding: EdgeInsets.only(
+              left: 16, right: 16, top: 8, bottom: 12 + bottomInset,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.discount_outlined),
+                  title: Text('Descuentos por credencial'),
+                  subtitle: Text(comercioNombre),
+                ),
+                CredentialBenefitsEditor(
+                  key: key,
+                  initialAcepta: acepta,
+                  initialBeneficios: beneficios,
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text('Cerrar'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: FilledButton.icon(
+                        icon: const Icon(Icons.save_outlined),
+                        label: const Text('Guardar'),
+                        onPressed: () async {
+                          final payload = key.currentState?.buildPayload() ?? {};
+                          await ref.set(payload, SetOptions(merge: true));
+                          if (context.mounted) {
+                            Navigator.pop(ctx);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Beneficios guardados')),
+                            );
+                          }
+                        },
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),

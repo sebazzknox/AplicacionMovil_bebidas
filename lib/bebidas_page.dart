@@ -7,9 +7,9 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import 'admin_state.dart'; // adminMode (ValueNotifier<bool>)
-// flag admin
-import 'ofertas_page.dart' show OfertasPage; // 👈 para navegar al listado de ofertas
-
+import 'ofertas_page.dart' show OfertasPage;
+// ✅ Descuentos por credencial
+import 'services/credential_service.dart';
 
 class BebidasPage extends StatefulWidget {
   const BebidasPage({
@@ -28,8 +28,8 @@ class BebidasPage extends StatefulWidget {
 class _BebidasPageState extends State<BebidasPage> {
   final _busquedaCtrl = TextEditingController();
   String _q = '';
-  String _cat = 'todas';           // 'todas' | 'cervezas'
-  final bool _soloPromos = false;        // “Ofertas” (solo para el estado visual)
+  String _cat = 'todas';                 // 'todas' | 'cervezas'
+  final bool _soloPromos = false;        // estado visual “Ofertas”
   final bool _mostrarInactivas = false;  // visible solo para admin
 
   final _picker = ImagePicker();
@@ -63,21 +63,17 @@ class _BebidasPageState extends State<BebidasPage> {
     return docs
         .map((d) => {'id': d.id, ...d.data()})
         .where((m) {
-          // activo (si no es admin)
           if (!_mostrarInactivas) {
             final activo = (m['activo'] ?? true) == true;
             if (!activo) return false;
           }
-          // ofertas
           if (_soloPromos && (m['promo'] != true)) return false;
 
-          // categoría (solo ‘cervezas’ o ‘todas’)
           if (_cat != 'todas') {
             final c = (m['categoria'] ?? '').toString().toLowerCase();
             if (c != 'cervezas') return false;
           }
 
-          // búsqueda
           if (q.isEmpty) return true;
           final nom = (m['nombre'] ?? '').toString().toLowerCase();
           final marca = (m['marca'] ?? '').toString().toLowerCase();
@@ -386,7 +382,7 @@ class _BebidasPageState extends State<BebidasPage> {
       await col.doc(editId).update(payload);
       if (_fotoTmp != null) {
         await _deleteFotoByPath(data?['fotoPath'] as String?);
-        final up = await _uploadFoto(widget.initialComercioId, editId);
+        final up = await _uploadFoto(widget.initialComercioId, editId!);
         if (up != null) {
           await col.doc(editId).update(
             {'fotoUrl': up.url, 'fotoPath': up.path},
@@ -490,7 +486,6 @@ class _BebidasPageState extends State<BebidasPage> {
                       selected: _soloPromos,
                       tint: Colors.pink,
                       onTap: () {
-                        // Navega a Ofertas. Si hay comercio actual, lo filtra.
                         final comercioId = widget.initialComercioId;
                         if (comercioId.isEmpty) {
                           Navigator.push(
@@ -537,7 +532,7 @@ class _BebidasPageState extends State<BebidasPage> {
                     return ListView.separated(
                       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                       itemCount: items.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
                       itemBuilder: (_, i) {
                         final m = items[i];
                         final id = m['id'] as String;
@@ -545,76 +540,33 @@ class _BebidasPageState extends State<BebidasPage> {
                         final marca = (m['marca'] ?? '') as String? ?? '';
                         final cat = (m['categoria'] ?? '') as String? ?? '';
                         final vol = (m['volumenMl'] ?? 0) as int? ?? 0;
-                        final precio = (m['precio'] ?? 0).toString();
+
+                        // ✅ Numéricos
+                        final precioNum = (m['precio'] as num?)?.toDouble() ?? 0.0;
                         final promo = (m['promo'] ?? false) == true;
-                        final promoPrecio =
-                            (m['promoPrecio'] ?? 0).toString();
+                        final promoPrecioNum =
+                            (m['promoPrecio'] as num?)?.toDouble();
+
                         final fotoUrl = m['fotoUrl'] as String?;
                         final activo = (m['activo'] ?? true) == true;
 
-                        return Material(
-                          color: Theme.of(context).colorScheme.surface,
-                          elevation: 0.5,
-                          borderRadius: BorderRadius.circular(16),
-                          child: ListTile(
-                            contentPadding: const EdgeInsets.all(12),
-                            leading: _Thumb(url: fotoUrl),
-                            title: Text(
-                              nombre,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            subtitle: Text(
-                              [
-                                if (marca.isNotEmpty) marca,
-                                if (vol > 0) '${vol}ml',
-                                if (cat.isNotEmpty) cat,
-                              ].join(' • '),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            trailing: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                if (promo)
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 8, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: Colors.pink.withOpacity(.12),
-                                      borderRadius:
-                                          BorderRadius.circular(999),
-                                    ),
-                                    child: Text(
-                                      '\$ $promoPrecio',
-                                      style: const TextStyle(
-                                        color: Colors.pink,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                  )
-                                else
-                                  Text(
-                                    '\$ $precio',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                if (!activo)
-                                  Text(
-                                    'inactiva',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: cs.error,
-                                    ),
-                                  ),
-                              ],
-                            ),
-                            onLongPress: admin
-                                ? () => _editarBebida(id, m)
-                                : null,
+                        return _BebidaCard(
+                          fotoUrl: fotoUrl,
+                          title: nombre,
+                          subtitle: [
+                            if (marca.isNotEmpty) marca,
+                            if (vol > 0) '${vol}ml',
+                            if (cat.isNotEmpty) cat,
+                          ].join(' • '),
+                          trailing: _PriceWithCredential(
+                            comercioId: widget.initialComercioId,
+                            precioBase: precioNum,
+                            promoPrecio: promo ? promoPrecioNum : null,
                           ),
+                          inactiveLabel: activo ? null : 'inactiva',
+                          onLongPress: AdminState.isAdmin(context)
+                              ? () => _editarBebida(id, m)
+                              : null,
                         );
                       },
                     );
@@ -624,7 +576,7 @@ class _BebidasPageState extends State<BebidasPage> {
             ],
           ),
           floatingActionButton:
-              admin ? _FabNuevo(onTap:_nuevaBebida) : null,
+              AdminState.isAdmin(context) ? _FabNuevo(onTap:_nuevaBebida) : null,
         );
       },
     );
@@ -708,8 +660,8 @@ class _Thumb extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(12),
       child: SizedBox(
-        width: 56,
-        height: 56,
+        width: 60,
+        height: 60,
         child: (url == null || url!.isEmpty)
             ? Container(
                 color: cs.surfaceContainerHighest.withOpacity(.5),
@@ -717,6 +669,244 @@ class _Thumb extends StatelessWidget {
               )
             : Image.network(url!, fit: BoxFit.cover),
       ),
+    );
+  }
+}
+
+/// ---------- Card linda para cada bebida ----------
+class _BebidaCard extends StatelessWidget {
+  final String? fotoUrl;
+  final String title;
+  final String subtitle;
+  final Widget trailing;
+  final String? inactiveLabel;
+  final VoidCallback? onLongPress;
+
+  const _BebidaCard({
+    required this.fotoUrl,
+    required this.title,
+    required this.subtitle,
+    required this.trailing,
+    this.inactiveLabel,
+    this.onLongPress,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Material(
+      color: cs.surface,
+      elevation: 0.8,
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onLongPress: onLongPress,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              _Thumb(url: fotoUrl),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: cs.onSurfaceVariant),
+                    ),
+                    if (inactiveLabel != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        inactiveLabel!,
+                        style: TextStyle(fontSize: 11, color: cs.error),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              ConstrainedBox(
+                constraints: const BoxConstraints(minWidth: 120, maxWidth: 150),
+                child: trailing,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// ===== Precio con lógica de credencial/promos (rediseñado) =====
+class _PriceWithCredential extends StatelessWidget {
+  final String comercioId;
+  final double precioBase;
+  final double? promoPrecio;
+
+  const _PriceWithCredential({
+    required this.comercioId,
+    required this.precioBase,
+    this.promoPrecio,
+  });
+
+  String _money(double v) {
+    final s = v.toStringAsFixed(0);
+    return s.replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => '.');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return StreamBuilder<double>(
+      stream: CredentialService.watchDiscountPctForComercio(comercioId),
+      builder: (context, snap) {
+        final pct = snap.data ?? 0.0;
+
+        final credPrice = pct > 0
+            ? CredentialService.priceWithPct(precioBase, pct)
+            : null;
+
+        // Elegimos el mejor
+        final candidates = <double>[
+          precioBase,
+          if (credPrice != null) credPrice,
+          if (promoPrecio != null) promoPrecio!,
+        ];
+        final best = candidates.reduce((a, b) => a < b ? a : b);
+
+        Widget row({
+          required String label,
+          required double value,
+          Color? color,
+          bool highlight = false,
+          bool strike = false,
+          String? extraRight, // ej. "-20%"
+        }) {
+          final txt = '\$ ${_money(value)}';
+          final baseStyle = TextStyle(
+            fontWeight: highlight ? FontWeight.w800 : FontWeight.w600,
+            color: color ?? cs.onSurface,
+          );
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 2),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: cs.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (extraRight != null)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: Text(
+                      extraRight,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: color ?? cs.primary,
+                      ),
+                    ),
+                  ),
+                Text(
+                  txt,
+                  style: strike
+                      ? baseStyle.copyWith(
+                          decoration: TextDecoration.lineThrough,
+                          color: (color ?? cs.onSurface).withOpacity(.55),
+                        )
+                      : baseStyle,
+                ),
+              ],
+            ),
+          );
+        }
+
+        final rows = <Widget>[];
+
+        // 1) Precio normal (si hay algo mejor, va tachado)
+        rows.add(row(
+          label: 'Precio normal',
+          value: precioBase,
+          strike: best < precioBase,
+        ));
+
+        // 2) Con tu credencial (si existe)
+        if (credPrice != null) {
+          final wins = credPrice <= best + 0.0001;
+          rows.add(row(
+            label: 'Con tu credencial',
+            value: credPrice,
+            color: Colors.green,
+            highlight: wins,
+            extraRight: '-${pct.toStringAsFixed(0)}%',
+          ));
+        }
+
+        // 3) Precio promo (si existe)
+        if (promoPrecio != null) {
+          final wins = promoPrecio! <= best + 0.0001;
+          rows.add(row(
+            label: 'Precio promo',
+            value: promoPrecio!,
+            color: Colors.pink,
+            highlight: wins,
+          ));
+        }
+
+        // Badge “Mejor precio” si el ganador no es el normal
+        final winnerIsNormal = best == precioBase;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            ...rows,
+            if (!winnerIsNormal)
+              Container(
+                margin: const EdgeInsets.only(top: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: cs.primary.withOpacity(.10),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.check_circle, size: 14, color: cs.primary),
+                    const SizedBox(width: 6),
+                    const Text(
+                      'Mejor precio',
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 }

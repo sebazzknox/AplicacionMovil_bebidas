@@ -45,6 +45,13 @@ class _CredencialPageState extends State<CredencialPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Mi credencial'),
+        actions: [
+          IconButton(
+            tooltip: 'Planes y beneficios',
+            icon: const Icon(Icons.info_outline),
+            onPressed: _showPlanesSheet,
+          ),
+        ],
       ),
       body: _user == null
           ? const _NoLoginCard()
@@ -58,7 +65,8 @@ class _CredencialPageState extends State<CredencialPage> {
                   return const Center(child: CircularProgressIndicator());
                 }
                 if (!snap.hasData || !snap.data!.exists) {
-                  return _NoCredentialCard(onSolicitar: _solicitar);
+                  // 👉 si no tiene credencial emitida, mostramos estado de solicitud (si existe)
+                  return _SolicitudStatusCard(onSolicitar: _showPlanesSheet);
                 }
 
                 final data = snap.data!.data()!;
@@ -155,38 +163,54 @@ class _CredencialPageState extends State<CredencialPage> {
 
   /* ───────── acciones ───────── */
 
-  Future<void> _solicitar() async {
+  // CTA viejo -> ahora abre el selector de planes
+  Future<void> _solicitar() async => _showPlanesSheet();
+
+  // Abre hoja con info de planes + permite elegir y solicitar uno
+  Future<void> _showPlanesSheet() async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => _PlanesYBeneficiosSheet(onElegirPlan: _solicitarTier),
+    );
+  }
+
+  // Crear solicitud con la categoría elegida
+  Future<void> _solicitarTier(String tierId) async {
     if (_user == null) return;
-
-    final uid   = _user!.uid;
-    final email = _user!.email ?? '';
-    final name  = _user!.displayName ?? '';
-
-    // 👉 Una solicitud por usuario: usamos el UID como ID del documento
     final ref = FirebaseFirestore.instance
         .collection('solicitudes_credenciales')
-        .doc(uid);
+        .doc(_user!.uid); // una solicitud por usuario
+
+    final already = await ref.get();
+    if (already.exists) {
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ya enviaste una solicitud.')),
+      );
+      return;
+    }
 
     try {
       await ref.set({
-        'uid': uid,
-        'email': email,
-        'displayName': name,
-        'emailLower': email.toLowerCase(),
-        'nameLower': name.toLowerCase(),
-        'estado': 'pendiente',   // compat Admin
-        'status': 'pendiente',   // compat Admin
+        'uid': _user!.uid,
+        'email': _user!.email,
+        'displayName': _user!.displayName,
         'createdAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true)); // no duplica si ya existe
-
+        'estado': 'pendiente',     // alineado con reglas
+        'categoria': tierId,       // CLASICA | PLUS | PREMIUM
+      });
       if (!mounted) return;
+      Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Solicitud enviada. Te avisamos cuando esté aprobada.')),
+        const SnackBar(content: Text('Solicitud enviada. Te avisamos cuando esté lista.')),
       );
-    } on FirebaseException catch (e) {
+    } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo enviar la solicitud: ${e.message ?? e.code}')),
+        SnackBar(content: Text('No se pudo enviar la solicitud: $e')),
       );
     }
   }
@@ -314,6 +338,8 @@ class _CredencialPageState extends State<CredencialPage> {
   }
 }
 
+/* ================== WIDGETS AUXILIARES ================== */
+
 class _NoLoginCard extends StatelessWidget {
   const _NoLoginCard();
 
@@ -339,8 +365,87 @@ class _NoLoginCard extends StatelessWidget {
   }
 }
 
+/// Muestra el estado de la solicitud (si existe), o el CTA para solicitar.
+class _SolicitudStatusCard extends StatelessWidget {
+  final VoidCallback onSolicitar; // abre el selector de planes
+  const _SolicitudStatusCard({required this.onSolicitar});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return const _NoLoginCard();
+
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('solicitudes_credenciales')
+          .doc(uid)
+          .snapshots(),
+      builder: (context, snap) {
+        // Si no hay doc de solicitud, mostramos el CTA para solicitar
+        if (!snap.hasData || !snap.data!.exists) {
+          return _NoCredentialCard(onSolicitar: onSolicitar);
+        }
+
+        final data = snap.data!.data()!;
+        final estado = (data['estado'] ?? data['status'] ?? 'pendiente').toString();
+        final createdAt = data['createdAt'];
+        final fecha = (createdAt is Timestamp)
+            ? '${createdAt.toDate().day.toString().padLeft(2,'0')}/${createdAt.toDate().month.toString().padLeft(2,'0')}'
+            : '';
+        final cat = (data['categoria'] ?? '—').toString();
+
+        IconData icon;
+        Color color;
+        String title;
+        String subtitle;
+
+        switch (estado) {
+          case 'aprobada':
+          case 'approved':
+            icon = Icons.verified_outlined;
+            color = cs.secondary;
+            title = 'Solicitud aprobada';
+            subtitle = 'Tu credencial $cat se emitirá en breve.';
+            break;
+          case 'rechazada':
+          case 'denied':
+            icon = Icons.block_outlined;
+            color = cs.error;
+            title = 'Solicitud rechazada';
+            subtitle = 'Podés volver a solicitar más adelante.';
+            break;
+          default:
+            icon = Icons.hourglass_top_outlined;
+            color = cs.primary;
+            title = 'Solicitud enviada';
+            subtitle = 'Recibida el $fecha • Plan: $cat';
+        }
+
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 72, color: color),
+                const SizedBox(height: 12),
+                Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 8),
+                Text(subtitle,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: cs.onSurfaceVariant)),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 class _NoCredentialCard extends StatelessWidget {
-  final VoidCallback onSolicitar;
+  final VoidCallback onSolicitar; // ahora abre el selector de planes
   const _NoCredentialCard({required this.onSolicitar});
 
   @override
@@ -358,7 +463,7 @@ class _NoCredentialCard extends StatelessWidget {
                 style: TextStyle(fontWeight: FontWeight.w700)),
             const SizedBox(height: 8),
             Text(
-              'Podés solicitarla y te la activamos cuando esté lista.',
+              'Elegí tu plan y solicitá la credencial. La activamos cuando esté lista.',
               textAlign: TextAlign.center,
               style: TextStyle(color: cs.onSurfaceVariant),
             ),
@@ -366,7 +471,7 @@ class _NoCredentialCard extends StatelessWidget {
             FilledButton.icon(
               onPressed: onSolicitar,
               icon: const Icon(Icons.send),
-              label: const Text('Solicitar credencial'),
+              label: const Text('Elegir plan y solicitar'),
             ),
           ],
         ),
@@ -506,11 +611,200 @@ class _ComoUsarla extends StatelessWidget {
   }
 }
 
+/* ================== PLANES & BENEFICIOS (hoja) ================== */
+
+class _PlanesYBeneficiosSheet extends StatelessWidget {
+  final void Function(String tierId) onElegirPlan;
+  const _PlanesYBeneficiosSheet({required this.onElegirPlan});
+
+  @override
+  Widget build(BuildContext context) {
+    final plans = _TierPlan.plans;
+    final cs = Theme.of(context).colorScheme;
+
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ListTile(
+              leading: Icon(Icons.verified_outlined),
+              title: Text('Planes de credencial'),
+              subtitle: Text('Elegí el plan que mejor se adapte a vos'),
+            ),
+            const SizedBox(height: 8),
+            Flexible(
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemBuilder: (_, i) {
+                  final p = plans[i];
+                  return _PlanCard(
+                    plan: p,
+                    onElegir: () => onElegirPlan(p.id),
+                    chipColor: cs.primaryContainer,
+                  );
+                },
+                separatorBuilder: (_, __) => const SizedBox(height: 12),
+                itemCount: plans.length,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PlanCard extends StatelessWidget {
+  final _TierPlan plan;
+  final VoidCallback onElegir;
+  final Color chipColor;
+
+  const _PlanCard({
+    required this.plan,
+    required this.onElegir,
+    required this.chipColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: plan.gradient,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(.12),
+            blurRadius: 14,
+            offset: const Offset(0, 8),
+          )
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('CREDENCIAL ${plan.label.toUpperCase()}',
+                style: const TextStyle(
+                  color: Colors.black87,
+                  fontWeight: FontWeight.w800,
+                )),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: -6,
+              children: plan.badges
+                  .map((b) => Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(.85),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(b,
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                color: Colors.black87)),
+                      ))
+                  .toList(),
+            ),
+            const SizedBox(height: 8),
+            ...plan.features.map((f) => Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.only(top: 6),
+                      child: Icon(Icons.check_circle_outline, size: 18, color: Colors.black87),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(f,
+                          style: const TextStyle(
+                              color: Colors.black87, height: 1.2)),
+                    ),
+                  ],
+                )),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: Colors.black87,
+                ),
+                onPressed: onElegir,
+                icon: const Icon(Icons.send),
+                label: const Text('Solicitar esta credencial'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/* ================== MODELOS ================== */
+
 class _TierTheme {
   final String id;
   final String label;
   final LinearGradient gradient;
   _TierTheme({required this.id, required this.label, required this.gradient});
+}
+
+class _TierPlan {
+  final String id;
+  final String label;
+  final LinearGradient gradient;
+  final List<String> badges;   // chips cortos
+  final List<String> features; // bullets
+
+  const _TierPlan({
+    required this.id,
+    required this.label,
+    required this.gradient,
+    required this.badges,
+    required this.features,
+  });
+
+  static const plans = <_TierPlan>[
+    _TierPlan(
+      id: 'CLASICA',
+      label: 'Clásica',
+      gradient: LinearGradient(colors: [Color(0xFFBDBDBD), Color(0xFFE0E0E0)]),
+      badges: ['Hasta 10%', 'QR digital'],
+      features: [
+        'Descuentos de 5–10% en bebidas en locales adheridos.',
+        'Promos básicas en packs (6, 12 unidades) según disponibilidad.',
+        'QR digital y número de credencial para validar en caja.',
+      ],
+    ),
+    _TierPlan(
+      id: 'PLUS',
+      label: 'Plus',
+      gradient: LinearGradient(colors: [Color(0xFF4F78FF), Color(0xFF6CC3FF)]),
+      badges: ['Hasta 20%', 'Prioridad'],
+      features: [
+        'Descuentos de 10–20% en bebidas en locales adheridos.',
+        'Acceso anticipado a promos de bebidas, combos y nuevas etiquetas.',
+        'Sorteos y bonus en packs/cajas seleccionadas.',
+      ],
+    ),
+    _TierPlan(
+      id: 'PREMIUM',
+      label: 'Premium',
+      gradient: LinearGradient(colors: [Color(0xFFFFD700), Color(0xFFF6B23B)]),
+      badges: ['Hasta 30%', 'Combos exclusivos', 'Top tier'],
+      features: [
+        'Descuentos de 20–30% en bebidas en locales adheridos.',
+        'Bonificaciones especiales en packs y combos de bebidas, incluso mayoristas.',
+        'Precios preferenciales por volumen y beneficios exclusivos en etiquetas premium.',
+      ],
+    ),
+  ];
 }
 
 class _BenefItem {
