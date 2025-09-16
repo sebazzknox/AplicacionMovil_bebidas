@@ -84,12 +84,12 @@ class CredentialBenefitsEditorState extends State<CredentialBenefitsEditor> {
       };
     }
 
-    double _read(String tier) =>
+    double read(String tier) =>
         double.tryParse(_pctCtrl[tier]!.text.trim().replaceAll(',', '.')) ?? 0.0;
 
     final map = <String, Map<String, num>>{};
     for (final tier in _pctCtrl.keys) {
-      final v = _read(tier);
+      final v = read(tier);
       if (v > 0) map[tier] = {'pct': v}; // ← estructura anidada
     }
 
