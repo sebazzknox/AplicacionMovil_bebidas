@@ -385,7 +385,7 @@ class _BebidasPageState extends State<BebidasPage> {
                     const SizedBox(height: 8),
 
                     DropdownButtonFormField<String>(
-                      value: categorias.contains(categoria)
+                      initialValue: categorias.contains(categoria)
                           ? categoria
                           : 'otras',
                       items: categorias
@@ -520,7 +520,7 @@ class _BebidasPageState extends State<BebidasPage> {
       await col.doc(editId).update(payload);
       if (_fotoTmp != null) {
         await _deleteFotoByPath(data?['fotoPath'] as String?);
-        final up = await _uploadFoto(widget.initialComercioId, editId!);
+        final up = await _uploadFoto(widget.initialComercioId, editId);
         if (up != null) {
           await col.doc(editId).update(
             {'fotoUrl': up.url, 'fotoPath': up.path},
@@ -761,11 +761,12 @@ class _BebidasPageState extends State<BebidasPage> {
 
 class _Pill extends StatelessWidget {
   const _Pill({
+    super.key,
     required this.icon,
     required this.label,
     required this.selected,
     required this.onTap,
-    this.tint,
+    this.tint, // <-- IMPORTANTe: inicializa el final
   });
 
   final IconData icon;

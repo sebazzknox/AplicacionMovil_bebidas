@@ -106,7 +106,7 @@ class BebidaDetallePage extends StatelessWidget {
 
     // Precio por litro (normal) -> double explícito
     final double precioPorLitro =
-        (vol > 0) ? ((precio / (vol / 1000)).clamp(0.0, double.infinity) as double) : 0.0;
+        (vol > 0) ? (precio / (vol / 1000)).clamp(0.0, double.infinity) : 0.0;
 
     // Flags para chips
     final esAlcoholica = _isAlcoholica(data);

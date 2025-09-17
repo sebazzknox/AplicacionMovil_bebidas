@@ -692,21 +692,202 @@ class _GifPromoBanner extends StatelessWidget {
     );
   }
 }
-
-/// ===== Fila de chips promocionales =====
+/// ===== Row de accesos en estilo “neumorphic” (soft/clean) =====
 class _PromoChipsRow extends StatelessWidget {
   final void Function(BuildContext) onTapChip;
   const _PromoChipsRow({required this.onTapChip});
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedFilterChips(
-      tags: const [
-        FilterTag(id: '2x1', label: '2x1', icon: Icons.local_drink_outlined),
-        FilterTag(id: 'happy', label: 'Happy Hour', icon: Icons.schedule_outlined),
-        FilterTag(id: 'envio', label: 'Envío gratis', icon: Icons.local_shipping_outlined),
-      ],
-      onSelected: (tag) => onTapChip(context),
+    final items = const [
+      _ChipData(
+        id: 'ofertas',
+        label: 'Ofertas de hoy',
+        icon: Icons.local_fire_department_outlined,
+        gradientA: Color(0xFF6A5AE0),
+        gradientB: Color(0xFF9E7BFF),
+      ),
+      _ChipData(
+        id: 'cerca',
+        label: 'Cerca tuyo',
+        icon: Icons.near_me_outlined,
+        gradientA: Color(0xFF00C6FF),
+        gradientB: Color(0xFF0072FF),
+      ),
+      _ChipData(
+        id: 'mayoristas',
+        label: 'Mayoristas',
+        icon: Icons.inventory_2_outlined,
+        gradientA: Color(0xFF0BA360),
+        gradientB: Color(0xFF3CBA92),
+      ),
+    ];
+
+    return SizedBox(
+      height: 80,
+      child: ListView.separated(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        scrollDirection: Axis.horizontal,
+        itemCount: items.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 12),
+        itemBuilder: (context, i) => _NeoActionTile(
+          data: items[i],
+          onTap: () => onTapChip(context),
+        ),
+      ),
+    );
+  }
+}
+
+/// Datos
+class _ChipData {
+  final String id;
+  final String label;
+  final IconData icon;
+  final Color gradientA;
+  final Color gradientB;
+  const _ChipData({
+    required this.id,
+    required this.label,
+    required this.icon,
+    required this.gradientA,
+    required this.gradientB,
+  });
+}
+
+/// Tile con look “neumorphic” + animación de presión
+class _NeoActionTile extends StatefulWidget {
+  final _ChipData data;
+  final VoidCallback onTap;
+  const _NeoActionTile({required this.data, required this.onTap});
+
+  @override
+  State<_NeoActionTile> createState() => _NeoActionTileState();
+}
+
+class _NeoActionTileState extends State<_NeoActionTile> {
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final d = widget.data;
+
+    final darkShadow = Colors.black.withOpacity(.10);
+    final lightShadow = Colors.white.withOpacity(.75);
+
+    return AnimatedScale(
+      duration: const Duration(milliseconds: 110),
+      curve: Curves.easeOut,
+      scale: _pressed ? 0.985 : 1,
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(18),
+        child: InkWell(
+          onTap: widget.onTap,
+          onHighlightChanged: (v) => setState(() => _pressed = v),
+          borderRadius: BorderRadius.circular(18),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            constraints: const BoxConstraints(minWidth: 180),
+            decoration: BoxDecoration(
+              color: cs.surface,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: cs.outlineVariant.withOpacity(.20)),
+              boxShadow: [
+                // Sombra inferior
+                BoxShadow(
+                  color: darkShadow,
+                  blurRadius: _pressed ? 8 : 16,
+                  offset: const Offset(8, 8),
+                ),
+                // Luz superior
+                BoxShadow(
+                  color: lightShadow,
+                  blurRadius: _pressed ? 6 : 14,
+                  offset: const Offset(-6, -6),
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Burbuja con gradiente + halo
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(colors: [d.gradientA, d.gradientB]),
+                    boxShadow: [
+                      BoxShadow(
+                        color: d.gradientB.withOpacity(.35),
+                        blurRadius: _pressed ? 6 : 12,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                ),
+                // Ícono blanco por encima (sin Positioned)
+                Transform.translate(
+                  offset: const Offset(-34, 0),
+                  child: const SizedBox.shrink(),
+                ),
+                Icon(d.icon, size: 18, color: Colors.white),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    d.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: cs.onSurface,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: .2,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Icon(Icons.chevron_right_rounded,
+                    size: 18, color: cs.onSurfaceVariant),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+/// Icono en cápsula circular con gradiente
+class _GradientCircleIcon extends StatelessWidget {
+  final IconData icon;
+  final Color a;
+  final Color b;
+  const _GradientCircleIcon({
+    required this.icon,
+    required this.a,
+    required this.b,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 32,
+      height: 32,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: LinearGradient(colors: [a, b]),
+      ),
+      child: const Icon(Icons.circle, size: 0), // mantiene el layout
+      foregroundDecoration: BoxDecoration(
+        shape: BoxShape.circle,
+        // Icono encima para no usar Positioned
+      ),
     );
   }
 }
