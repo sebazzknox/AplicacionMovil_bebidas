@@ -1504,28 +1504,36 @@ class _BannerCard extends StatelessWidget {
   }
 }
 
+// --- Assets locales de banners (Ofertas) ---
+// Colocá las imágenes reales en: assets/banners_ofertas_page/
+// Recomendado: 1200×450 aprox (2.6–2.8:1)
+const ofertasBannerAssets = <String>[
+  'assets/banners_ofertas_page/imagen2x1.jpg',
+  // 'assets/banners_ofertas_page/envio_gratis.jpg',
+  // 'assets/banners_ofertas_page/happy_hour.jpg',
+];
+
 /* ───────────── Carrusel local ───────────── */
 
 class _OfertasCarrusel extends StatefulWidget {
   const _OfertasCarrusel();
-
   @override
   State<_OfertasCarrusel> createState() => _OfertasCarruselState();
 }
 
 class _OfertasCarruselState extends State<_OfertasCarrusel> {
-  final _pageCtrl = PageController(viewportFraction: .9);
+  final _pageCtrl = PageController(viewportFraction: .92);
   Timer? _timer;
   int _idx = 0;
 
-  final List<String> _localImages = const [
-    'assets/banners/imagen2x1.jpg',
-    'assets/banners/prueba.jpg',
-  ];
+  List<String> get _imgs => ofertasBannerAssets;
 
   @override
   void initState() {
     super.initState();
+    // Debug útil para ver qué rutas está usando
+    // ignore: avoid_print
+    print('BANNERS OFERTAS: ${_imgs.join(", ")}');
     _startAuto();
   }
 
@@ -1538,40 +1546,157 @@ class _OfertasCarruselState extends State<_OfertasCarrusel> {
 
   void _startAuto() {
     _timer?.cancel();
-    if (_localImages.length <= 1) return;
+    if (_imgs.length <= 1) return;
     _timer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (!mounted) return;
-      _idx = (_idx + 1) % _localImages.length;
+      _idx = (_idx + 1) % _imgs.length;
       _pageCtrl.animateToPage(
         _idx,
         duration: const Duration(milliseconds: 450),
         curve: Curves.easeOut,
       );
+      setState(() {});
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_localImages.isEmpty) return const SizedBox.shrink();
+    if (_imgs.isEmpty) return const SizedBox.shrink();
+
+    final cs = Theme.of(context).colorScheme;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(0, 8, 0, 4),
-      child: SizedBox(
-        height: 148,
-        child: PageView.builder(
-          controller: _pageCtrl,
-          itemCount: _localImages.length,
-          itemBuilder: (_, i) {
-            final img = _localImages[i];
-            return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(16),
-                child: Image.asset(img, fit: BoxFit.cover),
-              ),
-            );
-          },
-        ),
+      child: LayoutBuilder(
+        builder: (ctx, cons) {
+          final width = cons.maxWidth;
+          const aspect = 2.75;           // relación de aspecto tipo banner
+          final cardWidth = width * .92;  // coincide con viewportFraction
+          final height = cardWidth / aspect;
+
+          final dpr = MediaQuery.of(context).devicePixelRatio;
+          final cacheW = (cardWidth * dpr).round();
+
+          return SizedBox(
+            height: height,
+            child: Stack(
+              alignment: Alignment.bottomCenter,
+              children: [
+                PageView.builder(
+                  controller: _pageCtrl,
+                  onPageChanged: (i) => setState(() => _idx = i),
+                  itemCount: _imgs.length,
+                  itemBuilder: (_, i) {
+                    final img = _imgs[i];
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(.10),
+                              blurRadius: 12,
+                              offset: const Offset(0, 6),
+                            ),
+                          ],
+                        ),
+                        clipBehavior: Clip.antiAlias,
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            Image.asset(
+                              img,
+                              fit: BoxFit.cover,
+                              cacheWidth: cacheW,
+                              filterQuality: FilterQuality.medium,
+                              errorBuilder: (_, __, ___) => _BannerFallback(),
+                            ),
+                            // degradado sutil inferior
+                            Positioned.fill(
+                              child: IgnorePointer(
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                      colors: [
+                                        Colors.transparent,
+                                        cs.surface.withOpacity(.07),
+                                        cs.surface.withOpacity(.20),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+
+                // Indicador de páginas
+                if (_imgs.length > 1)
+                  Positioned(
+                    bottom: 8,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: cs.surface.withOpacity(.75),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(color: cs.outlineVariant.withOpacity(.4)),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: List.generate(
+                            _imgs.length,
+                            (i) => _Dot(active: i == _idx),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _Dot extends StatelessWidget {
+  final bool active;
+  const _Dot({required this.active});
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      margin: const EdgeInsets.symmetric(horizontal: 3),
+      width: active ? 10 : 6,
+      height: 6,
+      decoration: BoxDecoration(
+        color: active ? cs.primary : cs.outline.withOpacity(.5),
+        borderRadius: BorderRadius.circular(999),
+      ),
+    );
+  }
+}
+
+class _BannerFallback extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      color: cs.surfaceContainerHighest.withOpacity(.6),
+      alignment: Alignment.center,
+      child: Text(
+        'Asset no encontrado',
+        style: TextStyle(color: cs.error, fontWeight: FontWeight.w700),
       ),
     );
   }

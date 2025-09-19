@@ -7,12 +7,12 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-import 'auth/auth_gate.dart';        // ⬅️ para volver al login tras logout
-import 'splash_screen.dart';         // ⬅️ pantalla inicial dentro del AuthGate
+import 'auth/auth_gate.dart';
+import 'splash_screen.dart';
 
 import 'admin_panel_page.dart';
-import 'admin_state.dart'; // adminMode + AdminState
-import 'comercios_page.dart' show ComerciosPage; // solo la clase
+import 'admin_state.dart';
+import 'comercios_page.dart' show ComerciosPage;
 import 'ofertas_page.dart' show OfertasPage;
 import 'promos_destacadas.dart';
 import 'services/analytics_service.dart';
@@ -24,11 +24,9 @@ import 'mapa_page.dart';
 import 'mayoristas_page.dart' show MayoristasPage;
 import 'credencial_page.dart';
 
-/// PIN local para activar modo admin (podés cambiarlo o leerlo de RemoteConfig)
-const String ADMIN_PIN = String.fromEnvironment('ADMIN_PIN', defaultValue: '123456');
+const String ADMIN_PIN =
+    String.fromEnvironment('ADMIN_PIN', defaultValue: '123456');
 
-/// (OPCIONAL) Firmarse anónimo y forzar rol admin en Firestore.
-/// La dejo por si querés usarla en algún flujo alternativo.
 Future<void> ensureSignedInAndPromoteToAdmin() async {
   final auth = FirebaseAuth.instance;
   if (auth.currentUser == null) {
@@ -41,26 +39,19 @@ Future<void> ensureSignedInAndPromoteToAdmin() async {
   );
 }
 
-/// Login con la cuenta oficial de admin por email/clave y asegura flags en /users/{uid}
 Future<bool> _signInAdminAccountAndSetFlags(BuildContext context) async {
   try {
-    // cerrar cualquier sesión previa (anónima u otra)
     await FirebaseAuth.instance.signOut();
-
-    // iniciar sesión con la cuenta del admin (asegurate que exista en Firebase Auth)
     await FirebaseAuth.instance.signInWithEmailAndPassword(
       email: 'admin@hotmail.com',
       password: '123456',
     );
-
-    // setear rol/flag en el doc del usuario
     final uid = FirebaseAuth.instance.currentUser!.uid;
     await FirebaseFirestore.instance.collection('users').doc(uid).set({
       'role': 'admin',
       'isAdmin': true,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
-
     return true;
   } catch (e) {
     if (context.mounted) {
@@ -72,19 +63,14 @@ Future<bool> _signInAdminAccountAndSetFlags(BuildContext context) async {
   }
 }
 
-/// ===== Página “contenedora” mínima (no la toco) =====
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      appBar: null,
-      body: HomeLandingPage(),
-    );
+    return const Scaffold(appBar: null, body: HomeLandingPage());
   }
 }
 
-/// ====================== HOME LANDING ======================
 class HomeLandingPage extends StatefulWidget {
   const HomeLandingPage({super.key});
   @override
@@ -95,12 +81,11 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
   @override
   void initState() {
     super.initState();
-    AppAnalytics.appOpen(); // registro de apertura
+    AppAnalytics.appOpen();
   }
 
-  // ⬇️ Logout con “reset” de navegación para volver al AuthGate
   Future<void> _logout(BuildContext context) async {
-    adminMode.value = false; // apagamos UI admin por las dudas
+    adminMode.value = false;
     try {
       await FirebaseAuth.instance.signOut();
     } catch (_) {}
@@ -118,7 +103,6 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
     return Scaffold(
       body: CustomScrollView(
         slivers: [
-          // ====== Encabezado grande con fondo + orbes + ola ======
           SliverAppBar.large(
             expandedHeight: 220,
             pinned: true,
@@ -145,9 +129,7 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
                       ],
                     ),
                   );
-                  if (ok == true) {
-                    await _logout(context); // 👈 vuelve a AuthGate (login/registro)
-                  }
+                  if (ok == true) await _logout(context);
                 },
               ),
             ],
@@ -155,7 +137,6 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
               background: Stack(
                 fit: StackFit.expand,
                 children: [
-                  // Gradiente base según tema
                   DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
@@ -165,9 +146,7 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
                       ),
                     ),
                   ),
-                  // Orbes suaves
                   const SoftOrbs(),
-                  // Título + slogan
                   Center(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
@@ -192,16 +171,14 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
                       ],
                     ),
                   ),
-                  // Ola inferior
                   const BottomWave(height: 42),
                 ],
               ),
             ),
           ),
 
-          // Saludo con tarjeta
           const SliverToBoxAdapter(child: GreetingHeader()),
-          // ===== Banner ADMIN (solo visible si adminMode = true) =====
+
           SliverToBoxAdapter(
             child: ValueListenableBuilder<bool>(
               valueListenable: adminMode,
@@ -222,10 +199,7 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
                         const Expanded(
                           child: Text(
                             'Admin activo',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                            ),
+                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
                           ),
                         ),
                         TextButton.icon(
@@ -234,9 +208,7 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
                             backgroundColor: Colors.white.withOpacity(.18),
                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                           ),
-                          onPressed: () async {
-                            await _logout(context); // 👈 mismo flujo
-                          },
+                          onPressed: () async => _logout(context),
                           icon: const Icon(Icons.logout, size: 18),
                           label: const Text('Salir'),
                         ),
@@ -248,11 +220,10 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
             ),
           ),
 
-          // ===== Banners publicitarios =====
-          const SliverToBoxAdapter(child: _HomePromoBanner()),
-          const SliverToBoxAdapter(child: _GifPromoBanner()),
+          // ========= HERO: carrusel del GIF “brindis” =========
+          const SliverToBoxAdapter(child: _GifHeroBanner()),
 
-          // ===== Chips de promos (abre la página de Ofertas) =====
+          // ===== Chips (colores adaptados a la app) =====
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -269,6 +240,7 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
                 ),
                 child: _PromoChipsRow(
                   onTapChip: (ctx) {
+                    // se usa para 'ofertas'; los otros se navegan directo
                     Navigator.push(
                       ctx,
                       MaterialPageRoute(builder: (_) => const OfertasPage()),
@@ -279,18 +251,15 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
             ),
           ),
 
-          // Promos destacadas
           const SliverToBoxAdapter(child: SizedBox(height: 8)),
           const SliverToBoxAdapter(child: PromosDestacadas()),
 
-          // ===== Contenido principal =====
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Buscador que abre Comercios
                   GlassSearchField(
                     hintText: 'Provincia, ciudad o comercio',
                     onTap: () => Navigator.push(
@@ -356,7 +325,6 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
                     ),
                   ),
 
-                  // Panel visible SOLO si admin activo
                   ValueListenableBuilder<bool>(
                     valueListenable: adminMode,
                     builder: (context, isAdmin, _) {
@@ -378,21 +346,16 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
                     },
                   ),
 
-                  // Redes
                   const SizedBox(height: 16),
-                  const Text(
-                    'Seguinos en redes sociales',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
+                  const Text('Seguinos en redes sociales',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   const SocialLinksCard(
                     facebookUrl: 'https://www.facebook.com/share/17JKBaM6Rs/',
                     instagramUrl:
                         'https://www.instagram.com/descabiooficial?igsh=MWVqdDByamI0Z2JnOQ==',
                     tiktokUrl: 'https://www.tiktok.com/@tu_usuario_tiktok',
                   ),
-
                   const SizedBox(height: 12),
-                  // 🔥 Se eliminó el botón "Soy administrador"
                 ],
               ),
             ),
@@ -402,7 +365,6 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
     );
   }
 
-  // ========= (Queda el método showAdminLogin definido más abajo si lo necesitás a futuro) =========
   void showAdminLogin(BuildContext context) {
     final isAdmin = AdminState.isAdmin(context);
 
@@ -411,7 +373,6 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
       showDragHandle: true,
       isScrollControlled: true,
       builder: (ctx) {
-        // Ya está logueado como admin
         if (isAdmin) {
           return SafeArea(
             child: Padding(
@@ -430,7 +391,9 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
                     label: const Text('Salir de modo admin'),
                     onPressed: () async {
                       adminMode.value = false;
-                      try { await FirebaseAuth.instance.signOut(); } catch (_) {}
+                      try {
+                        await FirebaseAuth.instance.signOut();
+                      } catch (_) {}
                       if (ctx.mounted) Navigator.pop(ctx);
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -445,7 +408,6 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
           );
         }
 
-        // Pedir PIN
         final pinCtrl = TextEditingController();
         return SafeArea(
           child: Padding(
@@ -519,207 +481,135 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
   }
 }
 
-/// ===== Banner publicitario (carrusel) =====
-class _HomePromoBanner extends StatefulWidget {
-  const _HomePromoBanner();
-  @override
-  State<_HomePromoBanner> createState() => _HomePromoBannerState();
-}
+/// ===== HERO: carrusel del GIF (16:9, protagonista) =====
+class _GifHeroBanner extends StatelessWidget {
+  const _GifHeroBanner();
 
-class _HomePromoBannerState extends State<_HomePromoBanner> {
-  final _pageCtrl = PageController(viewportFraction: .96);
-  final _imgs = const <String>[
-    'assets/banners/imagen2x1.jpg',
-    // 'assets/banners/prueba.jpg',
+  // Solo el brindis como “centro”
+  final _gifs = const [
+    'assets/gifs/brindis.gif', // asegurate de tenerlo en assets y en pubspec.yaml
   ];
-  int _index = 0;
-  Timer? _t;
 
   @override
-  void initState() {
-    super.initState();
-    _startAuto();
-  }
+  Widget build(BuildContext context) {
+    return LayoutBuilder(builder: (ctx, cons) {
+      final width = cons.maxWidth;
+      const aspect = 16 / 9;
+      final cardWidth = width * .96;
+      final height = cardWidth / aspect;
 
-  void _startAuto() {
-    _t?.cancel();
-    if (_imgs.length <= 1) return;
-    _t = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (!mounted) return;
-      _index = (_index + 1) % _imgs.length;
-      _pageCtrl.animateToPage(
-        _index,
-        duration: const Duration(milliseconds: 450),
-        curve: Curves.easeOut,
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
+        child: SizedBox(
+          height: height,
+          child: PageView.builder(
+            itemCount: _gifs.length,
+            controller: PageController(viewportFraction: .96),
+            itemBuilder: (_, i) {
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: _PromoGifCard(asset: _gifs[i], width: cardWidth, height: height),
+              );
+            },
+          ),
+        ),
       );
-      setState(() {});
     });
   }
+}
 
-  @override
-  void dispose() {
-    _t?.cancel();
-    _pageCtrl.dispose();
-    super.dispose();
-  }
+class _PromoGifCard extends StatelessWidget {
+  final String asset;
+  final double width;
+  final double height;
+  const _PromoGifCard({
+    required this.asset,
+    required this.width,
+    required this.height,
+  });
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final dpr = MediaQuery.of(context).devicePixelRatio;
+    final cacheW = (width * dpr).round();
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(.10),
-              blurRadius: 12,
-              offset: const Offset(0, 6),
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(18),
-          child: Stack(
-            alignment: Alignment.bottomCenter,
-            children: [
-              AspectRatio(
-                aspectRatio: 16 / 9,
-                child: PageView.builder(
-                  controller: _pageCtrl,
-                  onPageChanged: (i) => setState(() => _index = i),
-                  itemCount: _imgs.length,
-                  itemBuilder: (_, i) {
-                    return Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        Image.asset(_imgs[i], fit: BoxFit.cover),
-                        IgnorePointer(
-                          child: Container(
-                            decoration: const BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.topCenter,
-                                end: Alignment.bottomCenter,
-                                colors: [
-                                  Color(0x33FFFFFF),
-                                  Colors.transparent,
-                                  Colors.transparent,
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    );
-                  },
-                ),
-              ),
-              if (_imgs.length > 1)
-                Positioned(
-                  bottom: 8,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: cs.surface.withOpacity(.65),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: List.generate(
-                          _imgs.length,
-                          (i) => _Dot(active: i == _index),
-                        ),
-                      ),
-                    ),
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(.10),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset(
+            asset,
+            fit: BoxFit.cover,
+            filterQuality: FilterQuality.medium,
+            gaplessPlayback: true,
+            cacheWidth: cacheW,
+          ),
+          Positioned.fill(
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.transparent,
+                      cs.surface.withOpacity(.06),
+                      cs.surface.withOpacity(.18),
+                    ],
                   ),
                 ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _Dot extends StatelessWidget {
-  final bool active;
-  const _Dot({required this.active});
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      margin: const EdgeInsets.symmetric(horizontal: 3),
-      width: active ? 10 : 6,
-      height: 6,
-      decoration: BoxDecoration(
-        color: active
-            ? Theme.of(context).colorScheme.primary
-            : Theme.of(context).colorScheme.outline.withOpacity(.6),
-        borderRadius: BorderRadius.circular(999),
-      ),
-    );
-  }
-}
-
-/// ===== Carrusel de GIFs de promo =====
-class _GifPromoBanner extends StatelessWidget {
-  const _GifPromoBanner();
-  final _gifs = const [
-    'assets/gifs/beer_ad.gif',
-    'assets/gifs/drinks_offer.gif',
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 180,
-      child: PageView.builder(
-        itemCount: _gifs.length,
-        controller: PageController(viewportFraction: .9),
-        itemBuilder: (_, i) {
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: Image.asset(_gifs[i], fit: BoxFit.cover),
+              ),
             ),
-          );
-        },
+          ),
+        ],
       ),
     );
   }
 }
-/// ===== Row de accesos en estilo “neumorphic” (soft/clean) =====
+
+// ===== Row de accesos (colores adaptados a la app) =====
 class _PromoChipsRow extends StatelessWidget {
-  final void Function(BuildContext) onTapChip;
+  final void Function(BuildContext) onTapChip; // se usa para 'ofertas'
   const _PromoChipsRow({required this.onTapChip});
 
   @override
   Widget build(BuildContext context) {
+    // Paleta morado/rosa/azul en sintonía con el header
     final items = const [
       _ChipData(
         id: 'ofertas',
         label: 'Ofertas de hoy',
         icon: Icons.local_fire_department_outlined,
-        gradientA: Color(0xFF6A5AE0),
-        gradientB: Color(0xFF9E7BFF),
+        gradientA: Color.fromARGB(255, 255, 157, 77),
+        gradientB: Color(0xFFFF4081),
       ),
       _ChipData(
         id: 'cerca',
         label: 'Cerca tuyo',
         icon: Icons.near_me_outlined,
-        gradientA: Color(0xFF00C6FF),
-        gradientB: Color(0xFF0072FF),
+        gradientA: Color(0xFF00B0FF),
+        gradientB: Color(0xFF7C4DFF),
       ),
       _ChipData(
         id: 'mayoristas',
         label: 'Mayoristas',
         icon: Icons.inventory_2_outlined,
-        gradientA: Color(0xFF0BA360),
-        gradientB: Color(0xFF3CBA92),
+        gradientA: Color(0xFFFF6E40),
+        gradientB: Color(0xFFFF4081),
       ),
     ];
 
@@ -730,16 +620,36 @@ class _PromoChipsRow extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         itemCount: items.length,
         separatorBuilder: (_, __) => const SizedBox(width: 12),
-        itemBuilder: (context, i) => _NeoActionTile(
-          data: items[i],
-          onTap: () => onTapChip(context),
-        ),
+        itemBuilder: (context, i) {
+          final d = items[i];
+          return _NeoActionTile(
+            data: d,
+            onTap: () {
+              switch (d.id) {
+                case 'ofertas':
+                  onTapChip(context); // abre OfertasPage
+                  break;
+                case 'cerca':
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const MapaPage()),
+                  );
+                  break;
+                case 'mayoristas':
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const MayoristasPage()),
+                  );
+                  break;
+              }
+            },
+          );
+        },
       ),
     );
   }
 }
 
-/// Datos
 class _ChipData {
   final String id;
   final String label;
@@ -755,7 +665,6 @@ class _ChipData {
   });
 }
 
-/// Tile con look “neumorphic” + animación de presión
 class _NeoActionTile extends StatefulWidget {
   final _ChipData data;
   final VoidCallback onTap;
@@ -797,29 +706,20 @@ class _NeoActionTileState extends State<_NeoActionTile> {
               borderRadius: BorderRadius.circular(18),
               border: Border.all(color: cs.outlineVariant.withOpacity(.20)),
               boxShadow: [
-                // Sombra inferior
-                BoxShadow(
-                  color: darkShadow,
-                  blurRadius: _pressed ? 8 : 16,
-                  offset: const Offset(8, 8),
-                ),
-                // Luz superior
-                BoxShadow(
-                  color: lightShadow,
-                  blurRadius: _pressed ? 6 : 14,
-                  offset: const Offset(-6, -6),
-                ),
+                BoxShadow(color: darkShadow, blurRadius: _pressed ? 8 : 16, offset: const Offset(8, 8)),
+                BoxShadow(color: lightShadow, blurRadius: _pressed ? 6 : 14, offset: const Offset(-6, -6)),
               ],
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Burbuja con gradiente + halo
+                // Ícono ahora en un CUADRADO REDONDEADO (no círculo)
                 Container(
-                  width: 34,
-                  height: 34,
+                  width: 40,
+                  height: 40,
+                  alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    shape: BoxShape.circle,
+                    borderRadius: BorderRadius.circular(12),
                     gradient: LinearGradient(colors: [d.gradientA, d.gradientB]),
                     boxShadow: [
                       BoxShadow(
@@ -829,14 +729,14 @@ class _NeoActionTileState extends State<_NeoActionTile> {
                       ),
                     ],
                   ),
-                ),
-                // Ícono blanco por encima (sin Positioned)
-                Transform.translate(
-                  offset: const Offset(-34, 0),
                   child: const SizedBox.shrink(),
                 ),
-                Icon(d.icon, size: 18, color: Colors.white),
-                const SizedBox(width: 8),
+                // Ícono blanco superpuesto (para no usar Stack)
+                Transform.translate(
+                  offset: const Offset(-40, 0),
+                  child: Icon(d.icon, size: 20, color: Colors.white),
+                ),
+                const SizedBox(width: 6),
                 Flexible(
                   child: Text(
                     d.label,
@@ -850,8 +750,7 @@ class _NeoActionTileState extends State<_NeoActionTile> {
                   ),
                 ),
                 const SizedBox(width: 6),
-                Icon(Icons.chevron_right_rounded,
-                    size: 18, color: cs.onSurfaceVariant),
+                Icon(Icons.chevron_right_rounded, size: 18, color: cs.onSurfaceVariant),
               ],
             ),
           ),
@@ -861,17 +760,11 @@ class _NeoActionTileState extends State<_NeoActionTile> {
   }
 }
 
-
-/// Icono en cápsula circular con gradiente
 class _GradientCircleIcon extends StatelessWidget {
   final IconData icon;
   final Color a;
   final Color b;
-  const _GradientCircleIcon({
-    required this.icon,
-    required this.a,
-    required this.b,
-  });
+  const _GradientCircleIcon({required this.icon, required this.a, required this.b});
 
   @override
   Widget build(BuildContext context) {
@@ -883,16 +776,12 @@ class _GradientCircleIcon extends StatelessWidget {
         shape: BoxShape.circle,
         gradient: LinearGradient(colors: [a, b]),
       ),
-      child: const Icon(Icons.circle, size: 0), // mantiene el layout
-      foregroundDecoration: BoxDecoration(
-        shape: BoxShape.circle,
-        // Icono encima para no usar Positioned
-      ),
+      child: const Icon(Icons.circle, size: 0),
+      foregroundDecoration: const BoxDecoration(shape: BoxShape.circle),
     );
   }
 }
 
-/// ===== Card de acción =====
 class _ActionCard extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -929,15 +818,9 @@ class _ActionCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      title,
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
+                    Text(title, style: Theme.of(context).textTheme.titleMedium),
                     const SizedBox(height: 4),
-                    Text(
-                      subtitle,
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
+                    Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
                   ],
                 ),
               ),
@@ -950,7 +833,6 @@ class _ActionCard extends StatelessWidget {
   }
 }
 
-/// --- Header con saludo dinámico y fondo con gradiente ---
 class GreetingHeader extends StatelessWidget {
   const GreetingHeader({super.key});
 
@@ -996,10 +878,10 @@ class GreetingHeader extends StatelessWidget {
               children: [
                 Text(
                   _greeting(),
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleMedium
-                      ?.copyWith(fontWeight: FontWeight.w700, color: cs.onPrimaryContainer),
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: cs.onPrimaryContainer,
+                      ),
                 ),
                 const SizedBox(height: 4),
                 Text(
@@ -1018,7 +900,6 @@ class GreetingHeader extends StatelessWidget {
   }
 }
 
-/// --- Card con efecto “vidrio” (glassmorphism) ---
 class GlassCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry? padding;
@@ -1060,7 +941,6 @@ class GlassCard extends StatelessWidget {
   }
 }
 
-/// Animación sutil de “presionado”
 class _TapScale extends StatefulWidget {
   final Widget child;
   final double scale;
@@ -1086,7 +966,6 @@ class _TapScaleState extends State<_TapScale> {
   }
 }
 
-/// Logo animado del header
 class DescabioLogoTitle extends StatefulWidget {
   const DescabioLogoTitle({super.key});
   @override

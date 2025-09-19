@@ -15,7 +15,7 @@ class CustomerHomePage extends StatelessWidget {
             leading: const Icon(Icons.store_outlined),
             title: const Text('Explorar comercios'),
             onTap: () => Navigator.push(context,
-              MaterialPageRoute(builder: (_) => const ComerciosPage())),
+              MaterialPageRoute(builder: (_) =>  ComerciosPage())),
           ),
           ListTile(
             leading: const Icon(Icons.local_offer_outlined),

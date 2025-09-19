@@ -5,19 +5,20 @@ import 'dart:io';
 import 'dart:math' show sin, cos, atan2, sqrt, pi;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:http/http.dart' as http;
 
+import 'mayorista_detalle_page.dart';
 import 'widgets/commerce_tile.dart';
 import 'admin_state.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 
-// mini-mapa y types
+// ⬇️ Para mini-mapa y geocodificación
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as ll;
+import 'package:http/http.dart' as http;
 
 /* ==========================
    Persistencia simple de favoritos (archivo JSON local)
@@ -99,6 +100,7 @@ class _MayoristasPageState extends State<MayoristasPage> {
   bool _fAbierto = false;
   bool _fCerca = false;
   bool _ordenDist = false; // ordenar por distancia
+  bool _fPromos = false;   // se usa sólo si hay promos de mayoristas
 
   // ---------- Ubicación ----------
   bool _locBusy = false;
@@ -106,7 +108,11 @@ class _MayoristasPageState extends State<MayoristasPage> {
   double? _lng;
 
   // Radio de “Cerca”
-  double _radioKm = 20;
+  double _radioKm = 10;
+
+  // ---------- Promos (si existieran para mayoristas) ----------
+  StreamSubscription<QuerySnapshot>? _promoSub;
+  final Set<String> _mayoristasConPromo = <String>{};
 
   // ---------- Favoritos ----------
   final _favStore = _FavStore();
@@ -120,6 +126,7 @@ class _MayoristasPageState extends State<MayoristasPage> {
   void initState() {
     super.initState();
     _watchAdmin();
+    _listenPromos();
     _initFavs();
   }
 
@@ -128,6 +135,7 @@ class _MayoristasPageState extends State<MayoristasPage> {
     _authSub?.cancel();
     _userSub?.cancel();
     _searchCtrl.dispose();
+    _promoSub?.cancel();
     super.dispose();
   }
 
@@ -141,6 +149,34 @@ class _MayoristasPageState extends State<MayoristasPage> {
     await _favStore.toggle(id);
     _favs = _favStore.ids;
     if (mounted) setState(() {});
+  }
+
+  /* ================== PROMOS (opcional) ================== */
+  void _listenPromos() {
+    // Si en tu colección global de ofertas guardás promos para mayoristas,
+    // dejá un campo 'mayoristaId' que apunte al documento de mayorista.
+    final hoy = DateTime.now();
+    final inicioHoy = DateTime(hoy.year, hoy.month, hoy.day);
+    _promoSub = FirebaseFirestore.instance
+        .collection('ofertas')
+        .where('activa', isEqualTo: true)
+        .where('hasta', isGreaterThanOrEqualTo: Timestamp.fromDate(inicioHoy))
+        .snapshots()
+        .listen((snap) {
+      final s = <String>{};
+      for (final d in snap.docs) {
+        final m = d.data();
+        final id = (m['mayoristaId'] ?? '').toString();
+        if (id.isNotEmpty) s.add(id);
+      }
+      if (mounted) {
+        setState(() {
+          _mayoristasConPromo
+            ..clear()
+            ..addAll(s);
+        });
+      }
+    });
   }
 
   /* ================== UBICACIÓN ================== */
@@ -185,7 +221,7 @@ class _MayoristasPageState extends State<MayoristasPage> {
     final dLon = _deg2rad(lon2 - lon1);
     final a = sin(dLat / 2) * sin(dLat / 2) +
         cos(_deg2rad(lat1)) * cos(_deg2rad(lat2)) * sin(dLon / 2) * sin(dLon / 2);
-    final c = 2 * atan2(sqrt(1 - a), sqrt(a));
+    final c = 2 * atan2(sqrt(a), sqrt(1 - a));
     return R * c;
   }
 
@@ -423,7 +459,7 @@ class _MayoristasPageState extends State<MayoristasPage> {
   }
 
   /* ================== CREAR MAYORISTA (FAB) ================== */
-  Future<void> _crearMayorista() async {
+  Future<void> _crearMayoristaRapido() async {
     final nombreCtrl = TextEditingController();
     final ciudadCtrl = TextEditingController();
     final provCtrl = TextEditingController();
@@ -437,146 +473,152 @@ class _MayoristasPageState extends State<MayoristasPage> {
       context: context,
       builder: (_) => StatefulBuilder(
         builder: (ctx, setLocal) => AlertDialog(
+          insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+          contentPadding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
           title: const Text('Nuevo mayorista'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: nombreCtrl,
-                  decoration: const InputDecoration(labelText: 'Nombre'),
-                ),
-                TextField(
-                  controller: ciudadCtrl,
-                  decoration: const InputDecoration(labelText: 'Ciudad'),
-                ),
-                TextField(
-                  controller: provCtrl,
-                  decoration: const InputDecoration(labelText: 'Provincia'),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: dirCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Dirección (calle, número, ciudad)',
-                    prefixIcon: Icon(Icons.place_outlined),
+          // ⬇️ Clave para evitar los errores de IntrinsicWidth/Height
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: nombreCtrl,
+                    decoration: const InputDecoration(labelText: 'Nombre'),
                   ),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    OutlinedButton.icon(
-                      icon: const Icon(Icons.search),
-                      label: Text(buscando ? 'Buscando...' : 'Buscar dirección'),
-                      onPressed: buscando
-                          ? null
-                          : () async {
-                              final q = dirCtrl.text.trim();
-                              if (q.isEmpty) return;
-                              setLocal(() => buscando = true);
-                              final res = await _geocodeAddress(q);
-                              setLocal(() => buscando = false);
-                              if (res == null) {
-                                if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('No se encontró la dirección')),
-                                  );
+                  TextField(
+                    controller: ciudadCtrl,
+                    decoration: const InputDecoration(labelText: 'Ciudad'),
+                  ),
+                  TextField(
+                    controller: provCtrl,
+                    decoration: const InputDecoration(labelText: 'Provincia'),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: dirCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Dirección (calle, número, ciudad)',
+                      prefixIcon: Icon(Icons.place_outlined),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.search),
+                        label: Text(buscando ? 'Buscando...' : 'Buscar dirección'),
+                        onPressed: buscando
+                            ? null
+                            : () async {
+                                final q = dirCtrl.text.trim();
+                                if (q.isEmpty) return;
+                                setLocal(() => buscando = true);
+                                final res = await _geocodeAddress(q);
+                                setLocal(() => buscando = false);
+                                if (res == null) {
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('No se encontró la dirección')),
+                                    );
+                                  }
+                                  return;
                                 }
-                                return;
-                              }
-                              setLocal(() {
-                                lat = (res['lat'] as num).toDouble();
-                                lng = (res['lng'] as num).toDouble();
-                              });
-                            },
-                    ),
-                    OutlinedButton.icon(
-                      icon: const Icon(Icons.map_outlined),
-                      label: const Text('Elegir en mapa'),
-                      onPressed: () async {
-                        final picked = await _openMiniMapPicker(
-                          init: (lat != null && lng != null) ? ll.LatLng(lat!, lng!) : null,
-                        );
-                        if (picked != null) {
-                          setLocal(() {
-                            lat = picked.latitude;
-                            lng = picked.longitude;
-                          });
-                        }
-                      },
-                    ),
-                    OutlinedButton.icon(
-                      icon: const Icon(Icons.my_location),
-                      label: const Text('Usar mi ubicación'),
-                      onPressed: () async {
-                        final pos = await _getCurrentPosition();
-                        if (pos == null) {
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('No se pudo obtener la ubicación')),
-                            );
+                                setLocal(() {
+                                  lat = (res['lat'] as num).toDouble();
+                                  lng = (res['lng'] as num).toDouble();
+                                });
+                              },
+                      ),
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.map_outlined),
+                        label: const Text('Elegir en mapa'),
+                        onPressed: () async {
+                          final picked = await _openMiniMapPicker(
+                            init: (lat != null && lng != null) ? ll.LatLng(lat!, lng!) : null,
+                          );
+                          if (picked != null) {
+                            setLocal(() {
+                              lat = picked.latitude;
+                              lng = picked.longitude;
+                            });
                           }
-                          return;
-                        }
-                        setLocal(() {
-                          lat = pos.latitude;
-                          lng = pos.longitude;
-                        });
-                      },
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    (lat != null && lng != null)
-                        ? 'Ubicación: ${lat!.toStringAsFixed(5)}, ${lng!.toStringAsFixed(5)}'
-                        : 'Ubicación: (sin definir)',
-                    style: Theme.of(context).textTheme.bodySmall,
+                        },
+                      ),
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.my_location),
+                        label: const Text('Usar mi ubicación'),
+                        onPressed: () async {
+                          final pos = await _getCurrentPosition();
+                          if (pos == null) {
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('No se pudo obtener la ubicación')),
+                              );
+                            }
+                            return;
+                          }
+                          setLocal(() {
+                            lat = pos.latitude;
+                            lng = pos.longitude;
+                          });
+                        },
+                      ),
+                    ],
                   ),
-                ),
-                const SizedBox(height: 8),
-                if (lat != null && lng != null)
-                  SizedBox(
-                    height: 160,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: FlutterMap(
-                        options: MapOptions(
-                          initialCenter: ll.LatLng(lat!, lng!),
-                          initialZoom: 15,
-                          interactionOptions: const InteractionOptions(
-                            flags: InteractiveFlag.pinchZoom | InteractiveFlag.drag,
-                          ),
-                        ),
-                        children: [
-                          TileLayer(
-                            urlTemplate: _cartoTiles,
-                            subdomains: const ['a', 'b', 'c', 'd'],
-                            userAgentPackageName: 'com.descabio.app',
-                          ),
-                          MarkerLayer(markers: [
-                            Marker(
-                              point: ll.LatLng(lat!, lng!),
-                              width: 40,
-                              height: 40,
-                              child: Icon(Icons.location_on,
-                                  color: Theme.of(ctx).colorScheme.primary, size: 36),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      (lat != null && lng != null)
+                          ? 'Ubicación: ${lat!.toStringAsFixed(5)}, ${lng!.toStringAsFixed(5)}'
+                          : 'Ubicación: (sin definir)',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  if (lat != null && lng != null)
+                    SizedBox(
+                      height: 160,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: FlutterMap(
+                          options: MapOptions(
+                            initialCenter: ll.LatLng(lat!, lng!),
+                            initialZoom: 15,
+                            interactionOptions: const InteractionOptions(
+                              flags: InteractiveFlag.pinchZoom | InteractiveFlag.drag,
                             ),
-                          ]),
-                        ],
+                          ),
+                          children: [
+                            TileLayer(
+                              urlTemplate: _cartoTiles,
+                              subdomains: const ['a', 'b', 'c', 'd'],
+                              userAgentPackageName: 'com.descabio.app',
+                            ),
+                            MarkerLayer(markers: [
+                              Marker(
+                                point: ll.LatLng(lat!, lng!),
+                                width: 40,
+                                height: 40,
+                                child: Icon(Icons.location_on,
+                                    color: Theme.of(ctx).colorScheme.primary, size: 36),
+                              ),
+                            ]),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.of(ctx).pop(), // usa el ctx del diálogo
               child: const Text('Cancelar'),
             ),
             FilledButton(
@@ -593,7 +635,7 @@ class _MayoristasPageState extends State<MayoristasPage> {
                   'createdAt': now,
                   'updatedAt': now,
                 });
-                if (context.mounted) Navigator.pop(context);
+                if (context.mounted) Navigator.of(ctx).pop();
               },
               child: const Text('Crear'),
             ),
@@ -624,123 +666,16 @@ class _MayoristasPageState extends State<MayoristasPage> {
     }
   }
 
-  // === Picker mini-mapa ===
+  // === Picker en pantalla completa (evita “sheet” en blanco)
   Future<ll.LatLng?> _openMiniMapPicker({ll.LatLng? init}) async {
-    final mapCtrl = MapController();
-    ll.LatLng? picked = init;
-    final initial = init ??
-        ((_lat != null && _lng != null)
-            ? ll.LatLng(_lat!, _lng!)
-            : const ll.LatLng(-34.6037, -58.3816));
-
-    final result = await showModalBottomSheet<ll.LatLng>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (ctx) {
-        final cs = Theme.of(ctx).colorScheme;
-        return SafeArea(
-          child: Padding(
-            padding: EdgeInsets.only(
-              left: 16,
-              right: 16,
-              bottom: MediaQuery.of(ctx).viewInsets.bottom + 12,
-              top: 8,
-            ),
-            child: StatefulBuilder(
-              builder: (ctx, setLocal) {
-                return Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    ListTile(
-                      leading: const Icon(Icons.place_outlined),
-                      title: const Text('Elegí la ubicación'),
-                      subtitle: const Text('Mantené presionado para soltar el pin'),
-                      trailing: IconButton(
-                        tooltip: 'Mi ubicación',
-                        icon: const Icon(Icons.my_location_outlined),
-                        onPressed: () async {
-                          await _ensureLocation();
-                          if (_lat != null && _lng != null) {
-                            final me = ll.LatLng(_lat!, _lng!);
-                            mapCtrl.move(me, 15);
-                            setLocal(() => picked = me);
-                          }
-                        },
-                      ),
-                    ),
-                    SizedBox(
-                      height: MediaQuery.of(ctx).size.height * 0.55,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(14),
-                        child: FlutterMap(
-                          mapController: mapCtrl,
-                          options: MapOptions(
-                            initialCenter: initial,
-                            initialZoom: 14,
-                            onLongPress: (_, p) => setLocal(() => picked = p),
-                          ),
-                          children: [
-                            TileLayer(
-                              urlTemplate: _cartoTiles,
-                              subdomains: const ['a', 'b', 'c', 'd'],
-                              userAgentPackageName: 'com.descabio.app',
-                            ),
-                            if (picked != null)
-                              MarkerLayer(markers: [
-                                Marker(
-                                  width: 44,
-                                  height: 44,
-                                  point: picked!,
-                                  child: const Icon(Icons.location_on,
-                                      size: 38, color: Color(0xFF6C4ED2)),
-                                ),
-                              ]),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () => Navigator.pop(ctx, null),
-                            child: const Text('Cancelar'),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: FilledButton.icon(
-                            icon: const Icon(Icons.check),
-                            label: const Text('Confirmar'),
-                            onPressed: picked == null ? null : () => Navigator.pop(ctx, picked),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    if (picked != null)
-                      Text(
-                        '${picked!.latitude.toStringAsFixed(5)}, ${picked!.longitude.toStringAsFixed(5)}',
-                        style: TextStyle(color: cs.onSurfaceVariant),
-                      ),
-                    const SizedBox(height: 8),
-                  ],
-                );
-              },
-            ),
-          ),
-        );
-      },
+    return Navigator.of(context).push<ll.LatLng>(
+      MaterialPageRoute(builder: (_) => _PickOnMapPage(initial: init)),
     );
-
-    return result;
   }
 
   /* ================== Selector de radio para "Cerca" ================== */
   Future<void> _pickRadioKm() async {
-    final opciones = [5.0, 10.0, 20.0, 50.0, 100.0];
+    final opciones = [3.0, 5.0, 10.0, 20.0, 50.0];
     final sel = await showModalBottomSheet<double>(
       context: context,
       showDragHandle: true,
@@ -772,14 +707,16 @@ class _MayoristasPageState extends State<MayoristasPage> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
+    final isAdminUI = _isAdminDoc || AdminState.isAdmin(context);
+
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
         title: const Text('Mayoristas', style: TextStyle(fontWeight: FontWeight.w700)),
       ),
-      floatingActionButton: AdminState.isAdmin(context)
+      floatingActionButton: isAdminUI
           ? FloatingActionButton(
-              onPressed: _crearMayorista,
+              onPressed: _crearMayoristaRapido,
               child: const Icon(Icons.add_business),
             )
           : null,
@@ -861,6 +798,14 @@ class _MayoristasPageState extends State<MayoristasPage> {
                     setState(() => _ordenDist = !_ordenDist);
                   },
                 ),
+                const SizedBox(width: 8),
+                if (_mayoristasConPromo.isNotEmpty)
+                  _ChipToggle(
+                    icon: Icons.local_offer_outlined,
+                    label: 'Promos',
+                    selected: _fPromos,
+                    onTap: () => setState(() => _fPromos = !_fPromos),
+                  ),
               ],
             ),
           ),
@@ -893,6 +838,8 @@ class _MayoristasPageState extends State<MayoristasPage> {
                     return false;
                   }
 
+                  if (_fPromos && !_mayoristasConPromo.contains(d.id)) return false;
+
                   if (_fAbierto) {
                     final horarios = (m['horarios'] as Map<String, dynamic>?) ?? {};
                     if (!isOpenNow(horarios)) return false;
@@ -904,7 +851,7 @@ class _MayoristasPageState extends State<MayoristasPage> {
                     final lng = (m['lng'] as num?)?.toDouble();
                     if (lat == null || lng == null) return false;
                     final km = _distKm(_lat!, _lng!, lat, lng);
-                    if (km > _radioKm) return false;
+                    if (km > _radioKm) return false; // ← usa el radio elegido
                   }
 
                   return true;
@@ -975,21 +922,24 @@ class _MayoristasPageState extends State<MayoristasPage> {
                       }
 
                       final abierto = isOpenNow(horarios);
+                      final tienePromo = _mayoristasConPromo.contains(doc.id);
 
                       return CommerceTile(
                         title: nombre.isEmpty ? 'Sin nombre' : nombre,
                         subtitle: subt,
                         imageUrl: fotoUrl,
                         isOpen: abierto,
-                        hasPromo: false, // (no usamos promos para mayoristas)
+                        hasPromo: tienePromo,
                         distanceKm: distanciaKm,
+                        // ❤️ favoritos
                         isFavorite: _favs.contains(doc.id),
                         onToggleFavorite: () => _toggleFav(doc.id),
                         onTap: () {
-                          // Podés ir a un detalle propio de mayorista si querés
-                          // De momento, solo mostramos un snackbar
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text(nombre.isEmpty ? 'Mayorista' : nombre)),
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => MayoristaDetallePage(mayoristaId: doc.id),
+                            ),
                           );
                         },
                         onLongPress: AdminState.isAdmin(context)
@@ -1109,11 +1059,28 @@ class _MayoristasPageState extends State<MayoristasPage> {
       }
     } catch (_) {}
 
-    // Subcolecciones si existieran
+    // Subcolecciones del mayorista (si las tuvieras)
     await _deleteCollection(docRef.collection('horarios'));
     await _deleteCollection(docRef.collection('bebidas'));
     await _deleteCollection(docRef.collection('stock'));
-    await _deleteCollection(docRef.collection('ofertas'));
+    await _deleteCollection(docRef.collection('ofertas')); // si existe
+
+    // Ofertas globales que referencian a este mayorista
+    try {
+      while (true) {
+        final q = await fs
+            .collection('ofertas')
+            .where('mayoristaId', isEqualTo: cid)
+            .limit(50)
+            .get();
+        if (q.docs.isEmpty) break;
+        final batch = fs.batch();
+        for (final d in q.docs) {
+          batch.delete(d.reference);
+        }
+        await batch.commit();
+      }
+    } catch (_) {}
 
     // Doc del mayorista
     await docRef.delete();
@@ -1174,6 +1141,130 @@ class _ChipToggle extends StatelessWidget {
       ),
       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
       labelPadding: const EdgeInsets.symmetric(horizontal: 6),
+    );
+  }
+}
+
+/* ================== Página de selección en mapa ================== */
+class _PickOnMapPage extends StatefulWidget {
+  final ll.LatLng? initial;
+  const _PickOnMapPage({this.initial});
+
+  @override
+  State<_PickOnMapPage> createState() => _PickOnMapPageState();
+}
+
+class _PickOnMapPageState extends State<_PickOnMapPage> {
+  final _ctrl = MapController();
+  ll.LatLng? _point;
+  bool _locating = false;
+
+  static const String _tileUrl =
+      'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+
+  @override
+  void initState() {
+    super.initState();
+    _point = widget.initial;
+    if (_point == null) _ensureLoc();
+  }
+
+  Future<void> _ensureLoc() async {
+    setState(() => _locating = true);
+    try {
+      final service = await Geolocator.isLocationServiceEnabled();
+      if (!service) return;
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+        if (perm == LocationPermission.denied) return;
+      }
+      if (perm == LocationPermission.deniedForever) return;
+
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+      setState(() {
+        _point = ll.LatLng(pos.latitude, pos.longitude);
+      });
+      if (_point != null) {
+        _ctrl.move(_point!, 15);
+      }
+    } catch (_) {} finally {
+      if (mounted) setState(() => _locating = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final init = _point ?? const ll.LatLng(-34.6037, -58.3816);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Elegí la ubicación'),
+        actions: [
+          TextButton.icon(
+            onPressed: _point == null
+                ? null
+                : () => Navigator.pop(context, _point),
+            icon: const Icon(Icons.check),
+            label: const Text('Confirmar'),
+          ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          FlutterMap(
+            mapController: _ctrl,
+            options: MapOptions(
+              initialCenter: init,
+              initialZoom: 14,
+              interactionOptions:
+                  const InteractionOptions(flags: InteractiveFlag.all),
+              onTap: (_, p) => setState(() => _point = p),
+              onLongPress: (_, p) => setState(() => _point = p),
+            ),
+            children: [
+              TileLayer(
+                urlTemplate: _tileUrl,
+                subdomains: const ['a', 'b', 'c', 'd'],
+                userAgentPackageName: 'com.descabio.app',
+                maxZoom: 19,
+              ),
+              if (_point != null)
+                MarkerLayer(markers: [
+                  Marker(
+                    width: 40,
+                    height: 40,
+                    point: _point!,
+                    child: const Icon(Icons.location_on,
+                        size: 38, color: Color(0xFF6C4ED2)),
+                  ),
+                ]),
+            ],
+          ),
+
+          // Botón mi ubicación
+          Positioned(
+            bottom: 20,
+            right: 16,
+            child: Material(
+              color: cs.primaryContainer,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              elevation: 4,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: _ensureLoc,
+                child: const SizedBox(
+                  width: 52, height: 52,
+                  child: Icon(Icons.my_location_outlined),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
