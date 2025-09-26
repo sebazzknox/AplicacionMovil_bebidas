@@ -12,6 +12,16 @@ import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'comercio_detalle_page.dart';
+import 'dart:convert';                       // ← NUEVO
+import 'package:http/http.dart' as http;     // ← NUEVO
+typedef UploadRes = ({String url, String path});
+
+
+const String _CLOUDINARY_CLOUD_NAME = 'dlk7onebj';
+const String _CLOUDINARY_UPLOAD_PRESET = 'mi_default';
+
+
+
 
 /* ───────────── Utils ───────────── */
 
@@ -459,33 +469,73 @@ class _OfertasPageState extends State<OfertasPage> {
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
-                              IconButton(
-                                tooltip:
-                                    isFav ? 'Quitar de favoritos' : 'Guardar',
-                                icon: Icon(
-                                  isFav
-                                      ? Icons.favorite
-                                      : Icons.favorite_border,
-                                  color: isFav
-                                      ? Colors.pink
-                                      : Theme.of(context)
-                                          .colorScheme
-                                          .onSurfaceVariant,
-                                ),
-                                onPressed: () async {
-                                  final ok =
-                                      await _toggleFavorito(d.id, isFav);
-                                  if (!ok && mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                            'No pudimos actualizar favorito'),
-                                      ),
-                                    );
-                                  }
-                                },
-                              ),
-                              _BellSubDoc(ofertaId: d.id),
+                              
+// === reemplazar tu IconButton por todo este bloque ===
+StatefulBuilder(
+  builder: (ctx, setLocal) {
+    var localFav = isFav;    // estado local de este item
+    var saving   = false;
+
+    Future<void> _onTap() async {
+      if (saving) return;
+
+      saving = true;
+      if (ctx.mounted) setLocal(() {});
+
+      final prev = localFav;
+
+      // UI optimista (no bloquea la UI)
+      localFav = !localFav;
+      if (ctx.mounted) setLocal(() {});
+
+      final ok = await _toggleFavorito(d.id, prev);
+
+      if (!ok) {
+        if (!ctx.mounted) return;     // <- evita setState tras dispose
+        localFav = prev;
+        setLocal(() {});
+        ScaffoldMessenger.of(ctx).showSnackBar(
+          const SnackBar(content: Text('No pudimos actualizar favorito')),
+        );
+      }
+
+      if (!ctx.mounted) return;       // <- evita setState tras dispose
+      saving = false;
+      setLocal(() {});
+    }
+
+    return IconButton(
+      tooltip: localFav ? 'Quitar de favoritos' : 'Guardar',
+      onPressed: saving ? null : _onTap,
+
+      // Evita overlay/ripple del propio botón (para que no “ilumine” la card)
+      style: const ButtonStyle(
+        overlayColor: MaterialStatePropertyAll<Color>(Colors.transparent),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        visualDensity: VisualDensity.compact,
+      ),
+
+      icon: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 150),
+        transitionBuilder: (child, anim) => ScaleTransition(
+          // tween tipado y seguro
+          scale: anim.drive(Tween<double>(begin: .85, end: 1.0)),
+          child: child,
+        ),
+        child: Icon(
+          localFav ? Icons.favorite : Icons.favorite_border,
+          key: ValueKey<bool>(localFav),
+          color: localFav
+              ? Colors.pink
+              : Theme.of(ctx).colorScheme.onSurfaceVariant,
+        ),
+      ),
+    );
+  },
+),
+
+
+                            _BellSubDoc(ofertaId: d.id),
                               if (isAdminUI)
                                 PopupMenuButton<String>(
                                   onSelected: (v) async {
@@ -973,34 +1023,7 @@ class _OfertasPageState extends State<OfertasPage> {
                     ),
                     const SizedBox(height: 8),
 
-                    InkWell(
-                      borderRadius: BorderRadius.circular(12),
-                      onTap: () async {
-                        final picked =
-                            await _seleccionarComercio(context);
-                        if (picked != null) {
-                          setLocal(() {
-                            selectedComercioId = picked['id'];
-                            selectedComercioName = picked['nombre'];
-                          });
-                        }
-                      },
-                      child: InputDecorator(
-                        decoration: const InputDecoration(
-                          labelText: 'Comercio',
-                          prefixIcon:
-                              Icon(Icons.store_mall_directory),
-                          border: OutlineInputBorder(),
-                        ),
-                        child: Text(
-                          (selectedComercioName?.isNotEmpty ?? false)
-                              ? selectedComercioName!
-                              : (selectedComercioId?.isNotEmpty ?? false)
-                                  ? 'ID: $selectedComercioId'
-                                  : 'Tocá para elegir un comercio',
-                        ),
-                      ),
-                    ),
+                    
                     const SizedBox(height: 8),
 
                     Row(
@@ -1140,64 +1163,81 @@ class _OfertasPageState extends State<OfertasPage> {
 
     final col = FirebaseFirestore.instance.collection('ofertas');
 
-    try {
-      if (isEdit) {
-        await doc.reference.update(payload);
+   /// Subida de imagen para OFERTAS (Cloudinary unsigned; fallback a Firebase)
+/// Devuelve un record: (url, path)
+Future<({String url, String path})?> _uploadFoto(String ofertaId) async {
+  if (_fotoTmp == null) return null;
+  try {
+    final useCloudinary =
+        _CLOUDINARY_CLOUD_NAME.isNotEmpty && _CLOUDINARY_UPLOAD_PRESET.isNotEmpty;
 
-        if (_fotoTmp != null) {
-          await _deleteFotoByPath(data?['fotoPath'] as String?);
-          final up = await _uploadFoto(doc.id);
-          if (up != null) {
-            await doc.reference
-                .update({'fotoUrl': up.url, 'fotoPath': up.path});
-          }
-        } else if ((fotoUrlPreview ?? '').isEmpty &&
-            (data?['fotoPath'] != null)) {
-          await _deleteFotoByPath(data?['fotoPath'] as String?);
-          await doc.reference.update({
-            'fotoUrl': FieldValue.delete(),
-            'fotoPath': FieldValue.delete(),
-          });
-        }
-      } else {
-        final newRef = await col.add({
-          ...payload,
-          'createdAt': FieldValue.serverTimestamp(),
-          'favoritesCount': 0,
-        });
-        if (_fotoTmp != null) {
-          final up = await _uploadFoto(newRef.id);
-          if (up != null) {
-            await newRef.update({'fotoUrl': up.url, 'fotoPath': up.path});
-          }
-        }
+    if (useCloudinary) {
+      final uri = Uri.parse(
+        'https://api.cloudinary.com/v1_1/$_CLOUDINARY_CLOUD_NAME/image/upload',
+      );
+
+      final req = http.MultipartRequest('POST', uri)
+        ..fields['upload_preset'] = _CLOUDINARY_UPLOAD_PRESET
+        ..files.add(await http.MultipartFile.fromPath('file', _fotoTmp!.path));
+
+      final res = await req.send();
+      final body = await res.stream.bytesToString();
+
+      if (res.statusCode != 200 && res.statusCode != 201) {
+        throw Exception('Cloudinary ${res.statusCode}: $body');
       }
-    } finally {
-      setState(() => _fotoTmp = null);
+
+      final Map<String, dynamic> j = jsonDecode(body) as Map<String, dynamic>;
+      final String? secure = (j['secure_url'] ?? j['url'])?.toString();
+      final String? publicId = j['public_id']?.toString();
+
+      if (secure == null || secure.isEmpty) {
+        throw Exception('Respuesta sin URL de imagen');
+      }
+
+      // path simbólico p/ reconocer Cloudinary; no se borra desde Firebase
+      return (url: secure, path: publicId != null ? 'cloudinary:$publicId' : '');
     }
 
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(isEdit ? 'Oferta actualizada' : 'Oferta creada')));
-    }
-  }
-
-  Future<({String url, String path})?> _uploadFoto(String ofertaId) async {
-    if (_fotoTmp == null) return null;
+    // Fallback: Firebase Storage
     final path = 'ofertas/$ofertaId/foto.jpg';
-    final ref = FirebaseStorage.instance.ref().child(path);
+    final ref = FirebaseStorage.instance.ref(path);
     await ref.putFile(
-        File(_fotoTmp!.path), SettableMetadata(contentType: 'image/jpeg'));
+      File(_fotoTmp!.path),
+      SettableMetadata(contentType: 'image/jpeg'),
+    );
     final url = await ref.getDownloadURL();
     return (url: url, path: path);
+
+  } catch (e) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo subir la imagen: $e')),
+      );
+    }
+    return null;
+  }
+}
+
+/// Borra en Firebase Storage solo si el path es de Firebase.
+/// Si es URL o Cloudinary, no hace nada (no tenemos credenciales para borrar allá).
+Future<void> _deleteFotoByPath(String? path) async {
+  if (path == null || path.isEmpty) return;
+
+  final p = path.trim();
+  if (p.startsWith('http://') ||
+      p.startsWith('https://') ||
+      p.startsWith('cloudinary:') ||
+      p.contains('res.cloudinary.com')) {
+    return; // no borrar si es Cloudinary o URL pública
   }
 
-  Future<void> _deleteFotoByPath(String? path) async {
-    if (path == null || path.isEmpty) return;
-    try {
-      await FirebaseStorage.instance.ref().child(path).delete();
-    } catch (_) {}
+  try {
+    await FirebaseStorage.instance.ref(p).delete();
+  } catch (_) {
+    // silencioso
   }
+}
 
   Future<bool> _confirmarBorrado(
       BuildContext context, String titulo) async {
@@ -1289,7 +1329,7 @@ class _OfertasPageState extends State<OfertasPage> {
       },
     );
   }
-}
+}}
 
 /* ───────────── Auxiliares UI ───────────── */
 

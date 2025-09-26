@@ -776,8 +776,8 @@ class _GradientCircleIcon extends StatelessWidget {
         shape: BoxShape.circle,
         gradient: LinearGradient(colors: [a, b]),
       ),
-      child: const Icon(Icons.circle, size: 0),
       foregroundDecoration: const BoxDecoration(shape: BoxShape.circle),
+      child: const Icon(Icons.circle, size: 0),
     );
   }
 }

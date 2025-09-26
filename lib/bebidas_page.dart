@@ -1,5 +1,7 @@
 // lib/bebidas_page.dart
 import 'dart:io';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -7,10 +9,20 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import 'admin_state.dart'; // adminMode (ValueNotifier<bool>)
-// Detalle de bebida
 import 'bebida_detalle_page.dart';
-// ✅ Descuentos por credencial
 import 'services/credential_service.dart';
+
+const String _CLOUDINARY_CLOUD_NAME = 'dlk7onebj';
+const String _CLOUDINARY_UPLOAD_PRESET = 'mi_default';
+
+/// ── Helper global: adapta URLs de Cloudinary a cuadrado (1:1) del tamaño físico.
+/// Si no es Cloudinary o no tiene `/image/upload/`, devuelve la URL tal cual.
+String _cloudinarySquare(String url, {required int sizePx}) {
+  const marker = '/image/upload/';
+  if (!url.contains('res.cloudinary.com') || !url.contains(marker)) return url;
+  final tr = 'f_auto,q_auto,c_fill,ar_1:1,w_$sizePx,h_$sizePx';
+  return url.replaceFirst(marker, '$marker$tr/');
+}
 
 class BebidasPage extends StatefulWidget {
   const BebidasPage({
@@ -30,7 +42,7 @@ class _BebidasPageState extends State<BebidasPage> {
   final _busquedaCtrl = TextEditingController();
   String _q = '';
 
-  /// Filtro activo: 'todas' | 'alcoholicas' | 'pallet' | 'energizantes' | 'gaseosas'
+  /// 'todas' | 'alcoholicas' | 'pallet' | 'energizantes' | 'gaseosas'
   String _filtro = 'todas';
 
   final bool _mostrarInactivas = false; // visible solo para admin
@@ -81,7 +93,6 @@ class _BebidasPageState extends State<BebidasPage> {
     final marca = (m['marca'] ?? '').toString().toLowerCase();
     final s = '$cat $nom $marca';
 
-    // Palabras clave comunes
     const kw = [
       'cerveza',
       'vino',
@@ -150,10 +161,8 @@ class _BebidasPageState extends State<BebidasPage> {
   }
 
   bool _isPallet(Map<String, dynamic> m) {
-    // categoría explícita
     final cat = (m['categoria'] ?? '').toString().toLowerCase();
 
-    // 1) Campos explícitos si existen
     final palletFlag = (m['pallet'] == true) || (m['porPallet'] == true);
     final cantidad = (m['cantidad'] is num)
         ? (m['cantidad'] as num).toInt()
@@ -162,7 +171,6 @@ class _BebidasPageState extends State<BebidasPage> {
             : 0;
     if (palletFlag || cantidad >= 6) return true;
 
-    // 2) Heurística por nombre (x6, x12, pack, caja)
     final nom = (m['nombre'] ?? '').toString().toLowerCase();
     final marca = (m['marca'] ?? '').toString().toLowerCase();
     final s = '$nom $marca';
@@ -184,7 +192,6 @@ class _BebidasPageState extends State<BebidasPage> {
             if (!activo) return false;
           }
 
-          // Filtros nuevos
           switch (_filtro) {
             case 'alcoholicas':
               if (!_isAlcoholica(m)) return false;
@@ -220,34 +227,79 @@ class _BebidasPageState extends State<BebidasPage> {
     if (x != null) setLocal(() => _fotoTmp = x);
   }
 
+  /// Subida con Cloudinary (unsigned). Si no está configurado, fallback a Firebase Storage.
   Future<({String url, String path})?> _uploadFoto(
     String comercioId,
     String bebidaId,
   ) async {
     if (_fotoTmp == null) return null;
-    final file = File(_fotoTmp!.path);
-    final path = 'bebidas/$comercioId/$bebidaId.jpg';
-    final ref = FirebaseStorage.instance.ref(path);
-    await ref.putFile(file, SettableMetadata(contentType: 'image/jpeg'));
-    final url = await ref.getDownloadURL();
-    return (url: url, path: path);
+    try {
+      final hasCloudinary =
+          _CLOUDINARY_CLOUD_NAME.isNotEmpty && _CLOUDINARY_UPLOAD_PRESET.isNotEmpty;
+
+      if (hasCloudinary) {
+        final uri = Uri.parse(
+            'https://api.cloudinary.com/v1_1/$_CLOUDINARY_CLOUD_NAME/image/upload');
+
+        final req = http.MultipartRequest('POST', uri)
+          ..fields['upload_preset'] = _CLOUDINARY_UPLOAD_PRESET
+          ..files.add(await http.MultipartFile.fromPath('file', _fotoTmp!.path));
+
+        final res = await req.send();
+        final body = await res.stream.bytesToString();
+
+        if (res.statusCode != 200 && res.statusCode != 201) {
+          throw Exception('Cloudinary ${res.statusCode}: $body');
+        }
+
+        final json = jsonDecode(body) as Map<String, dynamic>;
+        final url = (json['secure_url'] ?? json['url'])?.toString();
+        final publicId = json['public_id']?.toString();
+        if (url == null || url.isEmpty) {
+          throw Exception('Respuesta sin URL de imagen');
+        }
+        // path simbólico para distinguir que viene de Cloudinary
+        return (url: url, path: publicId != null ? 'cloudinary:$publicId' : '');
+      }
+
+      // Fallback: Firebase Storage
+      final file = File(_fotoTmp!.path);
+      final path = 'bebidas/$comercioId/$bebidaId.jpg';
+      final ref = FirebaseStorage.instance.ref(path);
+      await ref.putFile(file, SettableMetadata(contentType: 'image/jpeg'));
+      final url = await ref.getDownloadURL();
+      return (url: url, path: path);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No se pudo subir la foto: $e')),
+        );
+      }
+      return null;
+    }
   }
 
   Future<void> _deleteFotoByPath(String? path) async {
     if (path == null || path.isEmpty) return;
+    final p = path.trim();
+
+    // URLs/Cloudinary no se borran en Firebase
+    if (p.startsWith('http://') ||
+        p.startsWith('https://') ||
+        p.startsWith('cloudinary:') ||
+        p.contains('res.cloudinary.com')) {
+      return;
+    }
     try {
-      await FirebaseStorage.instance.ref(path).delete();
+      await FirebaseStorage.instance.ref(p).delete();
     } catch (_) {}
   }
 
   // ---------- CRUD ----------
-  Future<void> _nuevaBebida() async {
-    await _abrirForm();
-  }
+  Future<void> _nuevaBebida() async => _abrirForm();
 
-  Future<void> _editarBebida(String id, Map<String, dynamic> data) async {
-    await _abrirForm(editId: id, data: data);
-  }
+  Future<void> _editarBebida(String id, Map<String, dynamic> data) async =>
+      _abrirForm(editId: id, data: data);
 
   Future<void> _eliminarBebida(String id, Map<String, dynamic> data) async {
     final ok = await showDialog<bool>(
@@ -282,21 +334,16 @@ class _BebidasPageState extends State<BebidasPage> {
     final marcaCtrl =
         TextEditingController(text: (data?['marca'] ?? '').toString());
     final volCtrl = TextEditingController(
-        text:
-            (data?['volumenMl'] == null) ? '' : (data!['volumenMl']).toString());
+        text: (data?['volumenMl'] == null) ? '' : (data!['volumenMl']).toString());
     final precioCtrl = TextEditingController(
         text: (data?['precio'] == null) ? '' : data!['precio'].toString());
     final promoPrecioCtrl = TextEditingController(
-        text: (data?['promoPrecio'] == null)
-            ? ''
-            : data!['promoPrecio'].toString());
+        text: (data?['promoPrecio'] == null) ? '' : data!['promoPrecio'].toString());
     final descCtrl =
         TextEditingController(text: (data?['descripcion'] ?? '').toString());
 
-    String categoria =
-        (data?['categoria'] ?? 'otras').toString().toLowerCase();
-    // Compatibilidad vieja
-    if (categoria == 'cervezas') categoria = 'alcoholicas';
+    String categoria = (data?['categoria'] ?? 'otras').toString().toLowerCase();
+    if (categoria == 'cervezas') categoria = 'alcoholicas'; // compat vieja
 
     bool promo = (data?['promo'] ?? false) == true;
     bool activo = (data?['activo'] ?? true) == true;
@@ -304,24 +351,15 @@ class _BebidasPageState extends State<BebidasPage> {
     String? fotoUrlPreview = data?['fotoUrl'] as String?;
     _fotoTmp = null;
 
-    // Catálogo disponible para crear/editar
-    final categorias = <String>[
-      'alcoholicas',
-      'pallet',
-      'energizantes',
-      'gaseosas',
-      'otras',
-    ];
+    final categorias = <String>['alcoholicas', 'pallet', 'energizantes', 'gaseosas', 'otras'];
 
     final ok = await showDialog<bool>(
           context: context,
           builder: (_) => StatefulBuilder(
             builder: (ctx, setLocal) => AlertDialog(
-              title: Text(
-                isEdit
-                    ? 'Editar bebida'
-                    : 'Nueva bebida en ${widget.initialComercioNombre}',
-              ),
+              title: Text(isEdit
+                  ? 'Editar bebida'
+                  : 'Nueva bebida en ${widget.initialComercioNombre}'),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -334,33 +372,22 @@ class _BebidasPageState extends State<BebidasPage> {
                           width: 120,
                           height: 120,
                           child: _fotoTmp != null
-                              ? Image.file(
-                                  File(_fotoTmp!.path),
-                                  fit: BoxFit.cover,
-                                )
-                              : (fotoUrlPreview != null &&
-                                      fotoUrlPreview!.isNotEmpty)
-                                  ? Image.network(
-                                      fotoUrlPreview!,
-                                      fit: BoxFit.cover,
-                                    )
+                              ? Image.file(File(_fotoTmp!.path), fit: BoxFit.cover)
+                              : (fotoUrlPreview != null && fotoUrlPreview!.isNotEmpty)
+                                  ? Image.network(fotoUrlPreview!, fit: BoxFit.cover)
                                   : Container(
                                       color: Colors.black12,
-                                      child: const Icon(
-                                        Icons.add_a_photo,
-                                        size: 36,
-                                      ),
+                                      child: const Icon(Icons.add_a_photo, size: 36),
                                     ),
                         ),
                       ),
                     ),
                     const SizedBox(height: 12),
-                    if (_fotoTmp != null ||
-                        ((fotoUrlPreview ?? '').isNotEmpty))
+                    if (_fotoTmp != null || ((fotoUrlPreview ?? '').isNotEmpty))
                       TextButton.icon(
                         onPressed: () => setLocal(() {
                           _fotoTmp = null;
-                          fotoUrlPreview = null;
+                          fotoUrlPreview = null; // marcado como removida
                         }),
                         icon: const Icon(Icons.delete_outline),
                         label: const Text('Quitar foto'),
@@ -385,16 +412,9 @@ class _BebidasPageState extends State<BebidasPage> {
                     const SizedBox(height: 8),
 
                     DropdownButtonFormField<String>(
-                      initialValue: categorias.contains(categoria)
-                          ? categoria
-                          : 'otras',
+                      value: categorias.contains(categoria) ? categoria : 'otras',
                       items: categorias
-                          .map(
-                            (c) => DropdownMenuItem(
-                              value: c,
-                              child: Text(_prettyCat(c)),
-                            ),
-                          )
+                          .map((c) => DropdownMenuItem(value: c, child: Text(_prettyCat(c))))
                           .toList(),
                       onChanged: (v) => categoria = v ?? 'otras',
                       decoration: const InputDecoration(
@@ -410,8 +430,7 @@ class _BebidasPageState extends State<BebidasPage> {
                           child: TextField(
                             controller: volCtrl,
                             keyboardType:
-                                const TextInputType.numberWithOptions(
-                                    decimal: false),
+                                const TextInputType.numberWithOptions(decimal: false),
                             decoration: const InputDecoration(
                               labelText: 'Volumen (ml)',
                               prefixIcon: Icon(Icons.local_bar_outlined),
@@ -423,8 +442,7 @@ class _BebidasPageState extends State<BebidasPage> {
                           child: TextField(
                             controller: precioCtrl,
                             keyboardType:
-                                const TextInputType.numberWithOptions(
-                                    decimal: true),
+                                const TextInputType.numberWithOptions(decimal: true),
                             decoration: const InputDecoration(
                               labelText: 'Precio',
                               prefixIcon: Icon(Icons.attach_money),
@@ -445,8 +463,7 @@ class _BebidasPageState extends State<BebidasPage> {
                       TextField(
                         controller: promoPrecioCtrl,
                         keyboardType:
-                            const TextInputType.numberWithOptions(
-                                decimal: true),
+                            const TextInputType.numberWithOptions(decimal: true),
                         decoration: const InputDecoration(
                           labelText: 'Precio promo',
                           prefixIcon: Icon(Icons.local_offer_outlined),
@@ -494,9 +511,8 @@ class _BebidasPageState extends State<BebidasPage> {
     final nombre = nombreCtrl.text.trim();
     if (nombre.isEmpty) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Poné un nombre para la bebida')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Poné un nombre para la bebida')));
       }
       return;
     }
@@ -504,7 +520,7 @@ class _BebidasPageState extends State<BebidasPage> {
     final payload = <String, dynamic>{
       'nombre': nombre,
       'marca': marcaCtrl.text.trim(),
-      'categoria': categoria, // 'alcoholicas' | 'pallet' | 'energizantes' | 'gaseosas' | 'otras'
+      'categoria': categoria,
       'volumenMl': int.tryParse(volCtrl.text.trim()),
       'precio': double.tryParse(precioCtrl.text.trim()),
       'promo': promo,
@@ -517,24 +533,24 @@ class _BebidasPageState extends State<BebidasPage> {
     final col = _bebidasCol(widget.initialComercioId);
 
     if (isEdit) {
-      await col.doc(editId).update(payload);
+      final docRef = col.doc(editId);
+      await docRef.update(payload);
+
       if (_fotoTmp != null) {
         await _deleteFotoByPath(data?['fotoPath'] as String?);
-        final up = await _uploadFoto(widget.initialComercioId, editId);
+        final up = await _uploadFoto(widget.initialComercioId, editId!);
         if (up != null) {
-          await col.doc(editId).update(
-            {'fotoUrl': up.url, 'fotoPath': up.path},
-          );
+          await docRef.update({'fotoUrl': up.url, 'fotoPath': up.path});
         }
-      } else if ((fotoUrlPreview ?? '').isNotEmpty &&
-          (data?['fotoPath'] != null)) {
-        // nada: mantiene foto existente
-      } else if ((fotoUrlPreview ?? '').isEmpty && (data?['fotoPath'] != null)) {
-        await _deleteFotoByPath(data?['fotoPath'] as String?);
-        await col.doc(editId).update({
-          'fotoUrl': FieldValue.delete(),
-          'fotoPath': FieldValue.delete(),
-        });
+      } else {
+        final removed = (fotoUrlPreview ?? '').isEmpty;
+        if (removed) {
+          await _deleteFotoByPath(data?['fotoPath'] as String?);
+          await docRef.update({
+            'fotoUrl': FieldValue.delete(),
+            'fotoPath': FieldValue.delete(),
+          });
+        }
       }
     } else {
       final ref = await col.add({
@@ -551,9 +567,7 @@ class _BebidasPageState extends State<BebidasPage> {
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(isEdit ? 'Bebida actualizada' : 'Bebida creada'),
-        ),
+        SnackBar(content: Text(isEdit ? 'Bebida actualizada' : 'Bebida creada')),
       );
       setState(() => _fotoTmp = null);
     }
@@ -612,8 +626,8 @@ class _BebidasPageState extends State<BebidasPage> {
                           ),
                     filled: true,
                     fillColor: cs.surfaceContainerHighest.withOpacity(.6),
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 12),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(16),
                       borderSide: BorderSide(
@@ -625,7 +639,7 @@ class _BebidasPageState extends State<BebidasPage> {
                 ),
               ),
 
-              // ======== Filtros (orden pedido) ========
+              // Filtros
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -676,7 +690,6 @@ class _BebidasPageState extends State<BebidasPage> {
                   ],
                 ),
               ),
-
               // Lista
               Expanded(
                 child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
@@ -711,7 +724,6 @@ class _BebidasPageState extends State<BebidasPage> {
                         final cat = (m['categoria'] as String?) ?? '';
                         final vol = (m['volumenMl'] as int?) ?? 0;
 
-                        // ✅ Numéricos
                         final precioNum =
                             (m['precio'] as num?)?.toDouble() ?? 0.0;
                         final promo = (m['promo'] ?? false) == true;
@@ -738,9 +750,8 @@ class _BebidasPageState extends State<BebidasPage> {
                           ),
                           inactiveLabel: activo ? null : 'inactiva',
                           onTap: () => _abrirDetalle(id, m),
-                          onLongPress: AdminState.isAdmin(context)
-                              ? () => _editarBebida(id, m)
-                              : null,
+                          onLongPress:
+                              AdminState.isAdmin(context) ? () => _editarBebida(id, m) : null,
                         );
                       },
                     );
@@ -766,7 +777,7 @@ class _Pill extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onTap,
-    this.tint, // <-- IMPORTANTe: inicializa el final
+    this.tint,
   });
 
   final IconData icon;
@@ -834,6 +845,13 @@ class _Thumb extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+
+    // Cuadrado de 64 px
+    const side = 64.0;
+    final dpr = MediaQuery.of(context).devicePixelRatio;
+    final cacheW = (side * dpr).round();
+
+    // Placeholder degradado
     final placeholder = Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(14),
@@ -846,28 +864,57 @@ class _Thumb extends StatelessWidget {
       child: Icon(Icons.local_drink, color: cs.onPrimaryContainer),
     );
 
-    final img = (url == null || url!.isEmpty)
-        ? placeholder
-        : ClipRRect(
-            borderRadius: BorderRadius.circular(14),
-            child: Image.network(url!, fit: BoxFit.cover),
-          );
+    // Imagen (Cloudinary 1:1, otros: cover centrado)
+    Widget buildImage(String u) {
+      final src = _cloudinarySquare(u, sizePx: cacheW);
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: Image.network(
+          src,
+          width: side,
+          height: side,
+          fit: BoxFit.cover,           // llena el cuadro recortando al centro
+          alignment: Alignment.center,
+          cacheWidth: cacheW,          // ahorra memoria en lista
+          filterQuality: FilterQuality.medium,
+          errorBuilder: (_, __, ___) => placeholder,
+          loadingBuilder: (c, child, prog) {
+            if (prog == null) return child;
+            return Container(
+              width: side,
+              height: side,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                color: cs.surfaceContainerHighest.withOpacity(.5),
+              ),
+              alignment: Alignment.center,
+              child: const SizedBox(
+                width: 18, height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            );
+          },
+        ),
+      );
+    }
 
-    final content = Container(
-      width: 64,
-      height: 64,
+    final thumb = Container(
+      width: side,
+      height: side,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: cs.outlineVariant.withOpacity(.35)),
       ),
       clipBehavior: Clip.hardEdge,
-      child: img,
+      child: (url == null || url!.isEmpty) ? placeholder : buildImage(url!),
     );
+
+    final content = (heroTag != null) ? Hero(tag: heroTag!, child: thumb) : thumb;
 
     return Stack(
       clipBehavior: Clip.none,
       children: [
-        if (heroTag != null) Hero(tag: heroTag!, child: content) else content,
+        content,
         if (badge != null)
           Positioned(
             right: -4,
@@ -893,8 +940,7 @@ class _EmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.local_drink_outlined,
-                size: 48, color: cs.onSurfaceVariant),
+            Icon(Icons.local_drink_outlined, size: 48, color: cs.onSurfaceVariant),
             const SizedBox(height: 10),
             Text(title, style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 6),
@@ -910,7 +956,7 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-/// ---------- Card linda para cada bebida ----------
+/// Card de cada bebida
 class _BebidaCard extends StatelessWidget {
   final String? fotoUrl;
   final bool isPromo;
@@ -951,7 +997,7 @@ class _BebidaCard extends StatelessWidget {
               style: TextStyle(
                 fontSize: 10,
                 fontWeight: FontWeight.w800,
-                color: Colors.pink,
+                color: Color.fromARGB(255, 233, 121, 30),
                 letterSpacing: .2,
               ),
             ),
@@ -1016,7 +1062,7 @@ class _BebidaCard extends StatelessWidget {
   }
 }
 
-/// ===== Precio con lógica de credencial/promos (rediseñado) =====
+// ===== Precio con lógica de credencial/promos =====
 class _PriceWithCredential extends StatelessWidget {
   final String comercioId;
   final double precioBase;
@@ -1045,7 +1091,6 @@ class _PriceWithCredential extends StatelessWidget {
         final credPrice =
             pct > 0 ? CredentialService.priceWithPct(precioBase, pct) : null;
 
-        // Elegimos el mejor
         final candidates = <double>[
           precioBase,
           if (credPrice != null) credPrice,
@@ -1059,7 +1104,7 @@ class _PriceWithCredential extends StatelessWidget {
           Color? color,
           bool highlight = false,
           bool strike = false,
-          String? extraRight, // ej. "-20%"
+          String? extraRight,
         }) {
           final txt = '\$ ${_money(value)}';
           final baseStyle = TextStyle(
@@ -1076,10 +1121,7 @@ class _PriceWithCredential extends StatelessWidget {
                     label,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: cs.onSurfaceVariant,
-                    ),
+                    style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -1111,14 +1153,12 @@ class _PriceWithCredential extends StatelessWidget {
 
         final rows = <Widget>[];
 
-        // 1) Precio normal (si hay algo mejor, va tachado)
         rows.add(row(
           label: 'Precio normal',
           value: precioBase,
           strike: best < precioBase,
         ));
 
-        // 2) Con tu credencial (si existe)
         if (credPrice != null) {
           final wins = credPrice <= best + 0.0001;
           rows.add(row(
@@ -1130,7 +1170,6 @@ class _PriceWithCredential extends StatelessWidget {
           ));
         }
 
-        // 3) Precio promo (si existe)
         if (promoPrecio != null) {
           final wins = promoPrecio! <= best + 0.0001;
           rows.add(row(
@@ -1157,8 +1196,7 @@ class _PriceWithCredential extends StatelessWidget {
               if (!winnerIsNormal)
                 Container(
                   margin: const EdgeInsets.only(top: 4),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(
                     color: cs.primary.withOpacity(.10),
                     borderRadius: BorderRadius.circular(999),
