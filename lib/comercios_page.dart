@@ -832,7 +832,16 @@ class _ComerciosPageState extends State<ComerciosPage> {
                   final ciudad = (m['ciudad'] ?? '').toString().toLowerCase();
                   final provincia = (m['provincia'] ?? '').toString().toLowerCase();
 
-                  if (q.isNotEmpty && !(nombre.contains(q) || ciudad.contains(q) || provincia.contains(q))) {
+                  // 👇 NUEVO: considerar zonasEntrega en la búsqueda
+                  final zonasLower = ((m['zonasEntrega'] as List?) ?? [])
+                      .map((e) => e.toString().toLowerCase())
+                      .toList();
+
+                  if (q.isNotEmpty &&
+                      !(nombre.contains(q) ||
+                        ciudad.contains(q) ||
+                        provincia.contains(q) ||
+                        zonasLower.any((z) => z.contains(q)))) {
                     return false;
                   }
 
@@ -909,9 +918,15 @@ class _ComerciosPageState extends State<ComerciosPage> {
                       final lng = (m['lng'] as num?)?.toDouble();
                       final horarios = m['horarios'] as Map<String, dynamic>?;
 
+                      // 👇 NUEVO: zonas para mostrar
+                      final zonasVis = ((m['zonasEntrega'] as List?) ?? [])
+                          .map((e) => e.toString())
+                          .toList();
+
                       final subt = [
                         if (ciudad.isNotEmpty) ciudad,
                         if (provincia.isNotEmpty) provincia,
+                        if (zonasVis.isNotEmpty) zonasVis.join(' • '),
                       ].join(' • ');
 
                       double? distanciaKm;

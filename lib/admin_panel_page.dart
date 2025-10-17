@@ -12,6 +12,8 @@ import 'finanzas_page.dart';
 import 'credenciales_admin_page.dart' show CredencialesAdminPage;
 // ✅ Import del editor de beneficios por credencial
 import 'widgets/credential_benefits_editor.dart';
+// ✅ NUEVO: Zonas de entrega (pantalla admin)
+import 'zonas_entrega_admin.dart' show ZonasEntregaAdmin;
 
 class AdminPanelPage extends StatelessWidget {
   const AdminPanelPage({super.key});
@@ -170,6 +172,28 @@ class AdminPanelPage extends StatelessWidget {
                   enabled: isAdmin,
                   onTap: (ctx) => _openCredencialesEditor(ctx),
                 ),
+
+                // ✅ NUEVO: Zonas de entrega por comercio
+                _AdminTile(
+                  icon: Icons.delivery_dining_outlined,
+                  title: 'Zonas de entrega',
+                  subtitle: 'Configurar por comercio',
+                  enabled: isAdmin,
+                  onTap: (ctx) async {
+                    final picked = await _pickComercio(ctx);
+                    if (picked == null) return;
+                    // ignore: use_build_context_synchronously
+                    Navigator.push(
+                      ctx,
+                      MaterialPageRoute(
+                        builder: (_) => ZonasEntregaAdmin(
+                          comercioId: picked['id']!,
+                          comercioNombre: picked['nombre']!,
+                        ),
+                      ),
+                    );
+                  },
+                ),
               ],
             ),
           ),
@@ -238,13 +262,34 @@ class AdminPanelPage extends StatelessWidget {
                 _openCredencialesEditor(context);
               },
             ),
+            // ✅ NUEVO: Acceso rápido Zonas de entrega
+            ListTile(
+              leading: const Icon(Icons.delivery_dining_outlined),
+              title: const Text('Zonas de entrega (comercio)'),
+              onTap: () async {
+                Navigator.pop(ctx);
+                final picked = await _pickComercio(context);
+                if (picked == null) return;
+                if (context.mounted) {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ZonasEntregaAdmin(
+                        comercioId: picked['id']!,
+                        comercioNombre: picked['nombre']!,
+                      ),
+                    ),
+                  );
+                }
+              },
+            ),
           ],
         ),
       ),
     );
   }
 
-  // ---------- Selector de comercio para Stock / Editor ----------
+  // ---------- Selector de comercio para Stock / Editor / Zonas ----------
   Future<Map<String, String>?> _pickComercio(BuildContext parentCtx) async {
     return await showModalBottomSheet<Map<String, String>>(
       context: parentCtx,
@@ -307,7 +352,7 @@ class AdminPanelPage extends StatelessWidget {
     );
   }
 
-  // ---------- NUEVO: Editor de beneficios por credencial ----------
+  // ---------- Editor de beneficios por credencial ----------
   Future<void> _openCredencialesEditor(BuildContext context) async {
     // 1) Elegir comercio
     final picked = await _pickComercio(context);
@@ -343,7 +388,7 @@ class AdminPanelPage extends StatelessWidget {
               children: [
                 ListTile(
                   leading: const Icon(Icons.discount_outlined),
-                  title: Text('Descuentos por credencial'),
+                  title: const Text('Descuentos por credencial'),
                   subtitle: Text(comercioNombre),
                 ),
                 CredentialBenefitsEditor(

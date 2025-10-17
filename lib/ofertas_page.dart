@@ -2,6 +2,8 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
+import 'dart:convert'; // Cloudinary
+import 'package:http/http.dart' as http; // Cloudinary
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -12,16 +14,12 @@ import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'comercio_detalle_page.dart';
-import 'dart:convert';                       // ← NUEVO
-import 'package:http/http.dart' as http;     // ← NUEVO
+
 typedef UploadRes = ({String url, String path});
 
-
+// ⚙️ Cloudinary (unsigned preset)
 const String _CLOUDINARY_CLOUD_NAME = 'dlk7onebj';
 const String _CLOUDINARY_UPLOAD_PRESET = 'mi_default';
-
-
-
 
 /* ───────────── Utils ───────────── */
 
@@ -116,7 +114,6 @@ class _OfertasPageState extends State<OfertasPage> {
           .snapshots()
           .listen((doc) {
         final m = doc.data() ?? {};
-        // Respetar SOLO el booleano isAdmin en Firestore
         final byBool = (m['isAdmin'] ?? false) == true;
         if (mounted) setState(() => _isAdminDoc = byBool);
       });
@@ -152,7 +149,6 @@ class _OfertasPageState extends State<OfertasPage> {
     final baseCol = FirebaseFirestore.instance.collection('ofertas');
     final uid = _uid();
 
-    // ✅ Admin UI solo si el doc de Firestore dice isAdmin: true
     final isAdminUI = _isAdminDoc;
 
     return Scaffold(
@@ -458,7 +454,6 @@ class _OfertasPageState extends State<OfertasPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // ⬇️ lista directa de widgets
                           Row(
                             children: [
                               Expanded(
@@ -469,94 +464,74 @@ class _OfertasPageState extends State<OfertasPage> {
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
-                              
-// === reemplazar tu IconButton por todo este bloque ===
-StatefulBuilder(
-  builder: (ctx, setLocal) {
-    var localFav = isFav;    // estado local de este item
-    var saving   = false;
+                              StatefulBuilder(
+                                builder: (ctx, setLocal) {
+                                  var localFav = isFav;
+                                  var saving = false;
 
-    Future<void> _onTap() async {
-      if (saving) return;
+                                  Future<void> onTap() async {
+                                    if (saving) return;
+                                    saving = true;
+                                    if (ctx.mounted) setLocal(() {});
+                                    final prev = localFav;
+                                    localFav = !localFav;
+                                    if (ctx.mounted) setLocal(() {});
+                                    final ok = await _toggleFavorito(d.id, prev);
+                                    if (!ok) {
+                                      if (!ctx.mounted) return;
+                                      localFav = prev;
+                                      setLocal(() {});
+                                      ScaffoldMessenger.of(ctx).showSnackBar(
+                                        const SnackBar(content: Text('No pudimos actualizar favorito')),
+                                      );
+                                    }
+                                    if (!ctx.mounted) return;
+                                    saving = false;
+                                    setLocal(() {});
+                                  }
 
-      saving = true;
-      if (ctx.mounted) setLocal(() {});
-
-      final prev = localFav;
-
-      // UI optimista (no bloquea la UI)
-      localFav = !localFav;
-      if (ctx.mounted) setLocal(() {});
-
-      final ok = await _toggleFavorito(d.id, prev);
-
-      if (!ok) {
-        if (!ctx.mounted) return;     // <- evita setState tras dispose
-        localFav = prev;
-        setLocal(() {});
-        ScaffoldMessenger.of(ctx).showSnackBar(
-          const SnackBar(content: Text('No pudimos actualizar favorito')),
-        );
-      }
-
-      if (!ctx.mounted) return;       // <- evita setState tras dispose
-      saving = false;
-      setLocal(() {});
-    }
-
-    return IconButton(
-      tooltip: localFav ? 'Quitar de favoritos' : 'Guardar',
-      onPressed: saving ? null : _onTap,
-
-      // Evita overlay/ripple del propio botón (para que no “ilumine” la card)
-      style: const ButtonStyle(
-        overlayColor: MaterialStatePropertyAll<Color>(Colors.transparent),
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        visualDensity: VisualDensity.compact,
-      ),
-
-      icon: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 150),
-        transitionBuilder: (child, anim) => ScaleTransition(
-          // tween tipado y seguro
-          scale: anim.drive(Tween<double>(begin: .85, end: 1.0)),
-          child: child,
-        ),
-        child: Icon(
-          localFav ? Icons.favorite : Icons.favorite_border,
-          key: ValueKey<bool>(localFav),
-          color: localFav
-              ? Colors.pink
-              : Theme.of(ctx).colorScheme.onSurfaceVariant,
-        ),
-      ),
-    );
-  },
-),
-
-
-                            _BellSubDoc(ofertaId: d.id),
+                                  return IconButton(
+                                    tooltip: localFav ? 'Quitar de favoritos' : 'Guardar',
+                                    onPressed: saving ? null : onTap,
+                                    style: const ButtonStyle(
+                                      overlayColor: WidgetStatePropertyAll<Color>(Colors.transparent),
+                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                      visualDensity: VisualDensity.compact,
+                                    ),
+                                    icon: AnimatedSwitcher(
+                                      duration: const Duration(milliseconds: 150),
+                                      transitionBuilder: (child, anim) => ScaleTransition(
+                                        scale: anim.drive(Tween<double>(begin: .85, end: 1.0)),
+                                        child: child,
+                                      ),
+                                      child: Icon(
+                                        localFav ? Icons.favorite : Icons.favorite_border,
+                                        key: ValueKey<bool>(localFav),
+                                        color: localFav
+                                            ? Colors.pink
+                                            : Theme.of(ctx).colorScheme.onSurfaceVariant,
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                              _BellSubDoc(ofertaId: d.id),
                               if (isAdminUI)
                                 PopupMenuButton<String>(
                                   onSelected: (v) async {
                                     if (v == 'edit') {
                                       _abrirFormOferta(doc: d);
                                     } else if (v == 'delete') {
-                                      final ok = await _confirmarBorrado(
-                                          context, titulo);
+                                      final ok = await _confirmarBorrado(context, titulo);
                                       if (ok) {
-                                        await _deleteFotoByPath(
-                                            data['fotoPath'] as String?);
+                                        await _deleteFotoByPath(data['fotoPath'] as String?);
                                         await d.reference.delete();
                                       }
                                     }
                                   },
                                   itemBuilder: (_) => const [
-                                    PopupMenuItem(
-                                        value: 'edit', child: Text('Editar')),
-                                    PopupMenuItem(
-                                        value: 'delete',
-                                        child: Text('Eliminar')),
+                                    PopupMenuItem(value: 'edit', child: Text('Editar')),
+                                    PopupMenuItem(value: 'delete', child: Text('Eliminar')),
                                   ],
                                 ),
                             ],
@@ -571,13 +546,10 @@ StatefulBuilder(
                               if (programada) _chipMini('⏳ Programada'),
                               if (finalizada) _chipMini('⛔ Finalizada'),
                               if (isDraft) _chipMini('📝 Borrador'),
-                              if (quedan != null)
-                                _chipMini(quedan > 0 ? 'Quedan $quedan' : 'Agotada'),
+                              if (quedan != null) _chipMini(quedan > 0 ? 'Quedan $quedan' : 'Agotada'),
                               if (distM != null)
                                 _chipMini(
-                                  distM >= 1000
-                                      ? '${(distM / 1000).toStringAsFixed(1)} km'
-                                      : '${distM.round()} m',
+                                  distM >= 1000 ? '${(distM / 1000).toStringAsFixed(1)} km' : '${distM.round()} m',
                                 ),
                             ],
                           ),
@@ -593,44 +565,30 @@ StatefulBuilder(
                                 if (precioOferta != null)
                                   Text(
                                     '\$ ${precioOferta.toStringAsFixed(0)}',
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.w800),
+                                    style: const TextStyle(fontWeight: FontWeight.w800),
                                   ),
-                                if (precioOriginal != null &&
-                                    precioOferta != null) ...[
+                                if (precioOriginal != null && precioOferta != null) ...[
                                   const SizedBox(width: 8),
                                   Text(
                                     '\$ ${precioOriginal.toStringAsFixed(0)}',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodySmall
-                                        ?.copyWith(
-                                          decoration:
-                                              TextDecoration.lineThrough,
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .outline,
+                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                          decoration: TextDecoration.lineThrough,
+                                          color: Theme.of(context).colorScheme.outline,
                                         ),
                                   ),
                                 ],
                                 if (descuento != null) ...[
                                   const SizedBox(width: 8),
                                   Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 8, vertical: 2),
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                                     decoration: BoxDecoration(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .primary
-                                          .withOpacity(.12),
+                                      color: Theme.of(context).colorScheme.primary.withOpacity(.12),
                                       borderRadius: BorderRadius.circular(999),
                                     ),
                                     child: Text(
                                       '-${descuento.round()}%',
                                       style: TextStyle(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .primary,
+                                        color: Theme.of(context).colorScheme.primary,
                                         fontWeight: FontWeight.w700,
                                       ),
                                     ),
@@ -644,8 +602,7 @@ StatefulBuilder(
                           Row(
                             children: [
                               Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 2),
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                                 decoration: BoxDecoration(
                                   color: (!finalizada && activa && !programada)
                                       ? Colors.green.withOpacity(.15)
@@ -658,16 +615,14 @@ StatefulBuilder(
                                       : programada
                                           ? 'Programada'
                                           : 'Finalizada',
-                                  style:
-                                      Theme.of(context).textTheme.labelSmall,
+                                  style: Theme.of(context).textTheme.labelSmall,
                                 ),
                               ),
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
                                   [
-                                    if (inicio != null)
-                                      'Desde ${_fmtFecha(inicio)}',
+                                    if (inicio != null) 'Desde ${_fmtFecha(inicio)}',
                                     if (fin != null) 'Hasta ${_fmtFecha(fin)}',
                                   ].join(' • '),
                                   maxLines: 1,
@@ -683,11 +638,9 @@ StatefulBuilder(
                             spacing: 8,
                             children: [
                               OutlinedButton.icon(
-                                icon:
-                                    const Icon(Icons.confirmation_number),
+                                icon: const Icon(Icons.confirmation_number),
                                 label: const Text('Cupón'),
-                                onPressed: () =>
-                                    _obtenerCupon(context, d.id, titulo),
+                                onPressed: () => _obtenerCupon(context, d.id, titulo),
                               ),
                               OutlinedButton.icon(
                                 icon: const Icon(Icons.ios_share),
@@ -695,13 +648,10 @@ StatefulBuilder(
                                 onPressed: () async {
                                   final texto =
                                       '$titulo\n${desc.isNotEmpty ? '$desc\n' : ''}Oferta en Descabio: https://descabio.app/oferta/${d.id}';
-                                  await Clipboard.setData(
-                                      ClipboardData(text: texto));
+                                  await Clipboard.setData(ClipboardData(text: texto));
                                   if (mounted) {
                                     ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                          content: Text(
-                                              'Texto copiado al portapapeles')),
+                                      const SnackBar(content: Text('Texto copiado al portapapeles')),
                                     );
                                   }
                                 },
@@ -718,9 +668,7 @@ StatefulBuilder(
                               OutlinedButton.icon(
                                 icon: const Icon(Icons.call),
                                 label: const Text('Llamar'),
-                                onPressed: () => _llamarComercio(
-                                    context,
-                                    comercioId: comercioId),
+                                onPressed: () => _llamarComercio(context, comercioId: comercioId),
                               ),
                             ],
                           ),
@@ -748,8 +696,7 @@ StatefulBuilder(
       return false;
     }
     try {
-      final userRef =
-          FirebaseFirestore.instance.collection('users').doc(uid);
+      final userRef = FirebaseFirestore.instance.collection('users').doc(uid);
       if (isFav) {
         await userRef.update({'favoritos.$ofertaId': FieldValue.delete()});
       } else {
@@ -763,8 +710,7 @@ StatefulBuilder(
     }
   }
 
-  Future<void> _obtenerCupon(
-      BuildContext context, String ofertaId, String titulo) async {
+  Future<void> _obtenerCupon(BuildContext context, String ofertaId, String titulo) async {
     final uid = _uid();
     if (uid == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -779,12 +725,10 @@ StatefulBuilder(
     try {
       final snap = await userRef.get();
       final data = snap.data() ?? {};
-      final Map<String, dynamic> cupones =
-          (data['cupones'] as Map<String, dynamic>?) ?? {};
+      final Map<String, dynamic> cupones = (data['cupones'] as Map<String, dynamic>?) ?? {};
       final existing = cupones[ofertaId] as Map<String, dynamic>?;
 
-      if (existing != null &&
-          (existing['code'] ?? '').toString().isNotEmpty) {
+      if (existing != null && (existing['code'] ?? '').toString().isNotEmpty) {
         code = existing['code'].toString();
       } else {
         code = _genCode();
@@ -817,18 +761,12 @@ StatefulBuilder(
             Text(titulo, style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 12),
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(12),
-                color: Theme.of(context)
-                    .colorScheme
-                    .surfaceContainerHighest,
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
                 border: Border.all(
-                  color: Theme.of(context)
-                      .colorScheme
-                      .outlineVariant
-                      .withOpacity(.4),
+                  color: Theme.of(context).colorScheme.outlineVariant.withOpacity(.4),
                 ),
               ),
               child: SelectableText(
@@ -843,8 +781,7 @@ StatefulBuilder(
               ),
             ),
             const SizedBox(height: 8),
-            Text('Mostralo en caja para canjear.',
-                style: Theme.of(context).textTheme.bodySmall),
+            Text('Mostralo en caja para canjear.', style: Theme.of(context).textTheme.bodySmall),
           ],
         ),
         actions: [
@@ -872,35 +809,26 @@ StatefulBuilder(
 
   /* ───────────── CRUD oferta (solo admin UI) ───────────── */
 
-  Future<void> _abrirFormOferta(
-      {DocumentSnapshot<Map<String, dynamic>>? doc}) async {
+  Future<void> _abrirFormOferta({DocumentSnapshot<Map<String, dynamic>>? doc}) async {
     final isEdit = doc != null;
     final data = doc?.data();
 
-    final tituloCtrl =
-        TextEditingController(text: data?['titulo'] ?? '');
-    final descCtrl =
-        TextEditingController(text: data?['descripcion'] ?? '');
-    final precioOCtrl = TextEditingController(
-        text: (data?['precioOriginal'] ?? data?['precio'])?.toString() ?? '');
-    final precioFCtrl = TextEditingController(
-        text: (data?['precioOferta'] ?? data?['promoPrecio'])?.toString() ?? '');
-    final stockCtrl =
-        TextEditingController(text: (data?['stock'] ?? '').toString());
+    final tituloCtrl = TextEditingController(text: data?['titulo'] ?? '');
+    final descCtrl = TextEditingController(text: data?['descripcion'] ?? '');
+    final precioOCtrl =
+        TextEditingController(text: (data?['precioOriginal'] ?? data?['precio'])?.toString() ?? '');
+    final precioFCtrl =
+        TextEditingController(text: (data?['precioOferta'] ?? data?['promoPrecio'])?.toString() ?? '');
+    final stockCtrl = TextEditingController(text: (data?['stock'] ?? '').toString());
 
-    String? selectedComercioId = data?['comercioId'] as String? ??
-        _filtroComercioId ??
-        widget.filterComercioId;
+    String? selectedComercioId = data?['comercioId'] as String? ?? _filtroComercioId ?? widget.filterComercioId;
     String? selectedComercioName;
 
     if ((selectedComercioId?.isNotEmpty ?? false)) {
       try {
-        final snap = await FirebaseFirestore.instance
-            .collection('comercios')
-            .doc(selectedComercioId)
-            .get();
-        selectedComercioName =
-            (snap.data()?['nombre'] ?? '') as String?;
+        final snap =
+            await FirebaseFirestore.instance.collection('comercios').doc(selectedComercioId).get();
+        selectedComercioName = (snap.data()?['nombre'] ?? '') as String?;
       } catch (_) {}
     }
 
@@ -935,22 +863,17 @@ StatefulBuilder(
                           width: 120,
                           height: 120,
                           child: _fotoTmp != null
-                              ? Image.file(File(_fotoTmp!.path),
-                                  fit: BoxFit.cover)
-                              : (fotoUrlPreview != null &&
-                                      fotoUrlPreview!.isNotEmpty)
-                                  ? Image.network(fotoUrlPreview!,
-                                      fit: BoxFit.cover)
+                              ? Image.file(File(_fotoTmp!.path), fit: BoxFit.cover)
+                              : (fotoUrlPreview != null && fotoUrlPreview!.isNotEmpty)
+                                  ? Image.network(fotoUrlPreview!, fit: BoxFit.cover)
                                   : Container(
                                       color: Colors.black12,
-                                      child: const Icon(Icons.add_a_photo,
-                                          size: 36),
+                                      child: const Icon(Icons.add_a_photo, size: 36),
                                     ),
                         ),
                       ),
                     ),
-                    if (_fotoTmp != null ||
-                        (fotoUrlPreview ?? '').isNotEmpty)
+                    if (_fotoTmp != null || (fotoUrlPreview ?? '').isNotEmpty)
                       TextButton.icon(
                         onPressed: () => setLocal(() {
                           _fotoTmp = null;
@@ -985,9 +908,7 @@ StatefulBuilder(
                         Expanded(
                           child: TextField(
                             controller: precioOCtrl,
-                            keyboardType:
-                                const TextInputType.numberWithOptions(
-                                    decimal: true),
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
                             decoration: const InputDecoration(
                               labelText: 'Precio original',
                               prefixIcon: Icon(Icons.money_off),
@@ -998,9 +919,7 @@ StatefulBuilder(
                         Expanded(
                           child: TextField(
                             controller: precioFCtrl,
-                            keyboardType:
-                                const TextInputType.numberWithOptions(
-                                    decimal: true),
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
                             decoration: const InputDecoration(
                               labelText: 'Precio oferta',
                               prefixIcon: Icon(Icons.attach_money),
@@ -1012,18 +931,14 @@ StatefulBuilder(
                     const SizedBox(height: 8),
                     TextField(
                       controller: stockCtrl,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(
-                              signed: false),
+                      keyboardType: const TextInputType.numberWithOptions(signed: false),
                       decoration: const InputDecoration(
                         labelText: 'Stock (opcional)',
-                        prefixIcon:
-                            Icon(Icons.inventory_2_outlined),
+                        prefixIcon: Icon(Icons.inventory_2_outlined),
                       ),
                     ),
                     const SizedBox(height: 8),
 
-                    
                     const SizedBox(height: 8),
 
                     Row(
@@ -1031,17 +946,13 @@ StatefulBuilder(
                         Expanded(
                           child: OutlinedButton.icon(
                             icon: const Icon(Icons.calendar_today),
-                            label: Text(inicio == null
-                                ? 'Desde'
-                                : _fmtFecha(inicio!)),
+                            label: Text(inicio == null ? 'Desde' : _fmtFecha(inicio!)),
                             onPressed: () async {
                               final today = DateTime.now();
                               final picked = await showDatePicker(
                                 context: ctx,
-                                firstDate:
-                                    DateTime(today.year - 1),
-                                lastDate:
-                                    DateTime(today.year + 3),
+                                firstDate: DateTime(today.year - 1),
+                                lastDate: DateTime(today.year + 3),
                                 initialDate: inicio ?? today,
                               );
                               if (picked != null) {
@@ -1054,18 +965,14 @@ StatefulBuilder(
                         Expanded(
                           child: OutlinedButton.icon(
                             icon: const Icon(Icons.event),
-                            label: Text(
-                                fin == null ? 'Hasta' : _fmtFecha(fin!)),
+                            label: Text(fin == null ? 'Hasta' : _fmtFecha(fin!)),
                             onPressed: () async {
                               final today = DateTime.now();
                               final picked = await showDatePicker(
                                 context: ctx,
-                                firstDate:
-                                    DateTime(today.year - 1),
-                                lastDate:
-                                    DateTime(today.year + 3),
-                                initialDate:
-                                    fin ?? (inicio ?? today),
+                                firstDate: DateTime(today.year - 1),
+                                lastDate: DateTime(today.year + 3),
+                                initialDate: fin ?? (inicio ?? today),
                               );
                               if (picked != null) {
                                 setLocal(() => fin = picked);
@@ -1081,45 +988,29 @@ StatefulBuilder(
                       children: [
                         const Text('Activa'),
                         const Spacer(),
-                        Switch(
-                          value: activa,
-                          onChanged: (v) =>
-                              setLocal(() => activa = v),
-                        ),
+                        Switch(value: activa, onChanged: (v) => setLocal(() => activa = v)),
                       ],
                     ),
                     Row(
                       children: [
                         const Text('Destacada (carrusel)'),
                         const Spacer(),
-                        Switch(
-                          value: destacada,
-                          onChanged: (v) =>
-                              setLocal(() => destacada = v),
-                        ),
+                        Switch(value: destacada, onChanged: (v) => setLocal(() => destacada = v)),
                       ],
                     ),
                     Row(
                       children: [
                         const Text('Borrador (no pública)'),
                         const Spacer(),
-                        Switch(
-                          value: draft,
-                          onChanged: (v) =>
-                              setLocal(() => draft = v),
-                        ),
+                        Switch(value: draft, onChanged: (v) => setLocal(() => draft = v)),
                       ],
                     ),
                   ],
                 ),
               ),
               actions: [
-                TextButton(
-                    onPressed: () => Navigator.pop(ctx, false),
-                    child: const Text('Cancelar')),
-                FilledButton(
-                    onPressed: () => Navigator.pop(ctx, true),
-                    child: const Text('Guardar')),
+                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+                FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Guardar')),
               ],
             ),
           ),
@@ -1133,27 +1024,20 @@ StatefulBuilder(
 
     final titulo = tituloCtrl.text.trim();
     if (titulo.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Falta el título')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Falta el título')));
       return;
     }
 
-    double? num(TextEditingController c) =>
-        double.tryParse(c.text.replaceAll(',', '.'));
+    double? numOf(TextEditingController c) => double.tryParse(c.text.replaceAll(',', '.'));
 
     final payload = <String, dynamic>{
       'titulo': titulo,
       'descripcion': descCtrl.text.trim(),
-      'comercioId': (selectedComercioId?.isNotEmpty ?? false)
-          ? selectedComercioId
-          : null,
-      'inicio': inicio != null
-          ? Timestamp.fromDate(inicio!)
-          : FieldValue.delete(),
-      'fin':
-          fin != null ? Timestamp.fromDate(fin!) : FieldValue.delete(),
-      'precioOriginal': num(precioOCtrl),
-      'precioOferta': num(precioFCtrl),
+      'comercioId': (selectedComercioId?.isNotEmpty ?? false) ? selectedComercioId : null,
+      'inicio': inicio != null ? Timestamp.fromDate(inicio!) : FieldValue.delete(),
+      'fin': fin != null ? Timestamp.fromDate(fin!) : FieldValue.delete(),
+      'precioOriginal': numOf(precioOCtrl),
+      'precioOferta': numOf(precioFCtrl),
       'stock': int.tryParse(stockCtrl.text),
       'activa': activa,
       'destacada': destacada,
@@ -1163,104 +1047,127 @@ StatefulBuilder(
 
     final col = FirebaseFirestore.instance.collection('ofertas');
 
-   /// Subida de imagen para OFERTAS (Cloudinary unsigned; fallback a Firebase)
-/// Devuelve un record: (url, path)
-Future<({String url, String path})?> _uploadFoto(String ofertaId) async {
-  if (_fotoTmp == null) return null;
-  try {
-    final useCloudinary =
-        _CLOUDINARY_CLOUD_NAME.isNotEmpty && _CLOUDINARY_UPLOAD_PRESET.isNotEmpty;
+    try {
+      if (isEdit) {
+        await doc.reference.update(payload);
 
-    if (useCloudinary) {
-      final uri = Uri.parse(
-        'https://api.cloudinary.com/v1_1/$_CLOUDINARY_CLOUD_NAME/image/upload',
-      );
-
-      final req = http.MultipartRequest('POST', uri)
-        ..fields['upload_preset'] = _CLOUDINARY_UPLOAD_PRESET
-        ..files.add(await http.MultipartFile.fromPath('file', _fotoTmp!.path));
-
-      final res = await req.send();
-      final body = await res.stream.bytesToString();
-
-      if (res.statusCode != 200 && res.statusCode != 201) {
-        throw Exception('Cloudinary ${res.statusCode}: $body');
+        if (_fotoTmp != null) {
+          await _deleteFotoByPath(data?['fotoPath'] as String?);
+          final up = await _uploadFoto(doc.id);
+          if (up != null) {
+            await doc.reference.update({'fotoUrl': up.url, 'fotoPath': up.path});
+          }
+        } else if ((fotoUrlPreview ?? '').isEmpty && (data?['fotoPath'] != null)) {
+          await _deleteFotoByPath(data?['fotoPath'] as String?);
+          await doc.reference.update({
+            'fotoUrl': FieldValue.delete(),
+            'fotoPath': FieldValue.delete(),
+          });
+        }
+      } else {
+        final newRef = await col.add({
+          ...payload,
+          'createdAt': FieldValue.serverTimestamp(),
+          'favoritesCount': 0,
+        });
+        if (_fotoTmp != null) {
+          final up = await _uploadFoto(newRef.id);
+          if (up != null) {
+            await newRef.update({'fotoUrl': up.url, 'fotoPath': up.path});
+          }
+        }
       }
-
-      final Map<String, dynamic> j = jsonDecode(body) as Map<String, dynamic>;
-      final String? secure = (j['secure_url'] ?? j['url'])?.toString();
-      final String? publicId = j['public_id']?.toString();
-
-      if (secure == null || secure.isEmpty) {
-        throw Exception('Respuesta sin URL de imagen');
-      }
-
-      // path simbólico p/ reconocer Cloudinary; no se borra desde Firebase
-      return (url: secure, path: publicId != null ? 'cloudinary:$publicId' : '');
+    } finally {
+      if (mounted) setState(() => _fotoTmp = null);
     }
 
-    // Fallback: Firebase Storage
-    final path = 'ofertas/$ofertaId/foto.jpg';
-    final ref = FirebaseStorage.instance.ref(path);
-    await ref.putFile(
-      File(_fotoTmp!.path),
-      SettableMetadata(contentType: 'image/jpeg'),
-    );
-    final url = await ref.getDownloadURL();
-    return (url: url, path: path);
-
-  } catch (e) {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo subir la imagen: $e')),
+        SnackBar(content: Text(isEdit ? 'Oferta actualizada' : 'Oferta creada')),
       );
     }
-    return null;
-  }
-}
-
-/// Borra en Firebase Storage solo si el path es de Firebase.
-/// Si es URL o Cloudinary, no hace nada (no tenemos credenciales para borrar allá).
-Future<void> _deleteFotoByPath(String? path) async {
-  if (path == null || path.isEmpty) return;
-
-  final p = path.trim();
-  if (p.startsWith('http://') ||
-      p.startsWith('https://') ||
-      p.startsWith('cloudinary:') ||
-      p.contains('res.cloudinary.com')) {
-    return; // no borrar si es Cloudinary o URL pública
   }
 
-  try {
-    await FirebaseStorage.instance.ref(p).delete();
-  } catch (_) {
-    // silencioso
-  }
-}
+  /// Subida de imagen para OFERTAS (Cloudinary unsigned; fallback a Firebase)
+  /// Devuelve un record: (url, path)
+  Future<UploadRes?> _uploadFoto(String ofertaId) async {
+    if (_fotoTmp == null) return null;
+    try {
+      final useCloudinary =
+          _CLOUDINARY_CLOUD_NAME.isNotEmpty && _CLOUDINARY_UPLOAD_PRESET.isNotEmpty;
 
-  Future<bool> _confirmarBorrado(
-      BuildContext context, String titulo) async {
+      if (useCloudinary) {
+        final uri =
+            Uri.parse('https://api.cloudinary.com/v1_1/$_CLOUDINARY_CLOUD_NAME/image/upload');
+
+        final req = http.MultipartRequest('POST', uri)
+          ..fields['upload_preset'] = _CLOUDINARY_UPLOAD_PRESET
+          ..files.add(await http.MultipartFile.fromPath('file', _fotoTmp!.path));
+
+        final res = await req.send();
+        final body = await res.stream.bytesToString();
+
+        if (res.statusCode != 200 && res.statusCode != 201) {
+          throw Exception('Cloudinary ${res.statusCode}: $body');
+        }
+
+        final Map<String, dynamic> j = jsonDecode(body) as Map<String, dynamic>;
+        final String? secure = (j['secure_url'] ?? j['url'])?.toString();
+        final String? publicId = j['public_id']?.toString();
+        if (secure == null || secure.isEmpty) {
+          throw Exception('Respuesta sin URL de imagen');
+        }
+
+        return (url: secure, path: publicId != null ? 'cloudinary:$publicId' : '');
+      }
+
+      // Fallback Firebase Storage
+      final path = 'ofertas/$ofertaId/foto.jpg';
+      final ref = FirebaseStorage.instance.ref(path);
+      await ref.putFile(File(_fotoTmp!.path), SettableMetadata(contentType: 'image/jpeg'));
+      final url = await ref.getDownloadURL();
+      return (url: url, path: path);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No se pudo subir la imagen: $e')),
+        );
+      }
+      return null;
+    }
+  }
+
+  /// Borra en Firebase Storage solo si el path es de Firebase (no Cloudinary/URL)
+  Future<void> _deleteFotoByPath(String? path) async {
+    if (path == null || path.isEmpty) return;
+    final p = path.trim();
+    if (p.startsWith('http://') ||
+        p.startsWith('https://') ||
+        p.startsWith('cloudinary:') ||
+        p.contains('res.cloudinary.com')) {
+      return;
+    }
+    try {
+      await FirebaseStorage.instance.ref(p).delete();
+    } catch (_) {}
+  }
+
+  Future<bool> _confirmarBorrado(BuildContext context, String titulo) async {
     return await showDialog<bool>(
           context: context,
           builder: (_) => AlertDialog(
             title: const Text('Confirmar borrado'),
             content: Text('¿Eliminar la oferta "$titulo"?'),
             actions: [
-              TextButton(
-                  onPressed: () => Navigator.pop(context, false),
-                  child: const Text('Cancelar')),
-              FilledButton(
-                  onPressed: () => Navigator.pop(context, true),
-                  child: const Text('Eliminar')),
+              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+              FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Eliminar')),
             ],
           ),
         ) ??
         false;
   }
 
-  Future<Map<String, String>?> _seleccionarComercio(
-      BuildContext parentCtx) async {
+  Future<Map<String, String>?> _seleccionarComercio(BuildContext parentCtx) async {
     return await showModalBottomSheet<Map<String, String>>(
       context: parentCtx,
       isScrollControlled: true,
@@ -1276,46 +1183,33 @@ Future<void> _deleteFotoByPath(String? path) async {
                   title: Text('Elegir comercio'),
                 ),
                 Expanded(
-                  child:
-                      StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                     stream: col.orderBy('nombre').snapshots(),
                     builder: (context, snap) {
                       if (!snap.hasData) {
-                        return const Center(
-                            child: CircularProgressIndicator());
+                        return const Center(child: CircularProgressIndicator());
                       }
                       final docs = snap.data!.docs;
                       if (docs.isEmpty) {
-                        return const Center(
-                            child: Text('No hay comercios.'));
+                        return const Center(child: Text('No hay comercios.'));
                       }
                       return ListView.builder(
                         itemCount: docs.length,
                         itemBuilder: (_, i) {
                           final d = docs[i];
                           final data = d.data();
-                          final nombre =
-                              (data['nombre'] ?? '') as String;
-                          final ciudad =
-                              (data['ciudad'] ?? '') as String?;
-                          final provincia =
-                              (data['provincia'] ?? '') as String?;
+                          final nombre = (data['nombre'] ?? '') as String;
+                          final ciudad = (data['ciudad'] ?? '') as String?;
+                          final provincia = (data['provincia'] ?? '') as String?;
                           final subt = [
-                            if (ciudad != null && ciudad.isNotEmpty)
-                              ciudad,
-                            if (provincia != null &&
-                                provincia.isNotEmpty)
-                              provincia,
+                            if (ciudad != null && ciudad.isNotEmpty) ciudad,
+                            if (provincia != null && provincia.isNotEmpty) provincia,
                           ].join(' • ');
                           return ListTile(
                             leading: const Icon(Icons.storefront),
                             title: Text(nombre),
-                            subtitle:
-                                subt.isEmpty ? null : Text(subt),
-                            onTap: () => Navigator.pop(ctx, {
-                              'id': d.id,
-                              'nombre': nombre,
-                            }),
+                            subtitle: subt.isEmpty ? null : Text(subt),
+                            onTap: () => Navigator.pop(ctx, {'id': d.id, 'nombre': nombre}),
                           );
                         },
                       );
@@ -1329,7 +1223,7 @@ Future<void> _deleteFotoByPath(String? path) async {
       },
     );
   }
-}}
+}
 
 /* ───────────── Auxiliares UI ───────────── */
 
@@ -1338,15 +1232,13 @@ class _SkeletonList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final base =
-        Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(.35);
+    final base = Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(.35);
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
       itemCount: 6,
       separatorBuilder: (_, __) => const SizedBox(height: 10),
       itemBuilder: (_, __) => Container(
-        decoration: BoxDecoration(
-            color: base, borderRadius: BorderRadius.circular(16)),
+        decoration: BoxDecoration(color: base, borderRadius: BorderRadius.circular(16)),
         height: 108,
       ),
     );
@@ -1362,7 +1254,7 @@ Widget _chipMini(String text) => Container(
       child: Text(text, style: const TextStyle(fontSize: 11)),
     );
 
-// 🔔 Suscripción a avisos de una oferta (persistencia en users/{uid}.subsOfertas)
+// 🔔 Suscripción a avisos de una oferta
 class _BellSubDoc extends StatelessWidget {
   final String ofertaId;
   const _BellSubDoc({required this.ofertaId});
@@ -1371,8 +1263,7 @@ class _BellSubDoc extends StatelessWidget {
   Widget build(BuildContext context) {
     final uid = _uid();
     if (uid == null) return const SizedBox.shrink();
-    final ref =
-        FirebaseFirestore.instance.collection('users').doc(uid);
+    final ref = FirebaseFirestore.instance.collection('users').doc(uid);
 
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: ref.snapshots(),
@@ -1383,18 +1274,13 @@ class _BellSubDoc extends StatelessWidget {
 
         return IconButton(
           tooltip: on ? 'Quitar avisos' : 'Avisarme',
-          icon: Icon(on
-              ? Icons.notifications_active
-              : Icons.notifications_none),
+          icon: Icon(on ? Icons.notifications_active : Icons.notifications_none),
           onPressed: () async {
             try {
               if (on) {
-                await ref.update(
-                    {'subsOfertas.$ofertaId': FieldValue.delete()});
+                await ref.update({'subsOfertas.$ofertaId': FieldValue.delete()});
               } else {
-                await ref.set({
-                  'subsOfertas': {ofertaId: true}
-                }, SetOptions(merge: true));
+                await ref.set({'subsOfertas': {ofertaId: true}}, SetOptions(merge: true));
               }
             } catch (e) {
               if (context.mounted) {
@@ -1435,8 +1321,7 @@ class _DynamicBanner extends StatelessWidget {
         }
 
         return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-          stream:
-              col.where('activo', isEqualTo: true).limit(1).snapshots(),
+          stream: col.where('activo', isEqualTo: true).limit(1).snapshots(),
           builder: (context, snap) {
             if (!snap.hasData || snap.data!.docs.isEmpty) {
               return const SizedBox.shrink();
@@ -1501,8 +1386,7 @@ class _BannerCard extends StatelessWidget {
                       if (titulo.isNotEmpty)
                         Text(
                           titulo,
-                          style:
-                              Theme.of(context).textTheme.titleMedium,
+                          style: Theme.of(context).textTheme.titleMedium,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -1510,8 +1394,7 @@ class _BannerCard extends StatelessWidget {
                         const SizedBox(height: 6),
                         Text(
                           texto,
-                          style:
-                              Theme.of(context).textTheme.bodySmall,
+                          style: Theme.of(context).textTheme.bodySmall,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -1526,9 +1409,7 @@ class _BannerCard extends StatelessWidget {
                       onPressed: () async {
                         final uri = Uri.tryParse(ctaUrl);
                         if (uri != null) {
-                          await launchUrl(uri,
-                              mode:
-                                  LaunchMode.externalApplication);
+                          await launchUrl(uri, mode: LaunchMode.externalApplication);
                         }
                       },
                       child: Text(ctaLabel),
@@ -1545,12 +1426,8 @@ class _BannerCard extends StatelessWidget {
 }
 
 // --- Assets locales de banners (Ofertas) ---
-// Colocá las imágenes reales en: assets/banners_ofertas_page/
-// Recomendado: 1200×450 aprox (2.6–2.8:1)
 const ofertasBannerAssets = <String>[
   'assets/banners_ofertas_page/imagen2x1.jpg',
-  // 'assets/banners_ofertas_page/envio_gratis.jpg',
-  // 'assets/banners_ofertas_page/happy_hour.jpg',
 ];
 
 /* ───────────── Carrusel local ───────────── */
@@ -1571,7 +1448,6 @@ class _OfertasCarruselState extends State<_OfertasCarrusel> {
   @override
   void initState() {
     super.initState();
-    // Debug útil para ver qué rutas está usando
     // ignore: avoid_print
     print('BANNERS OFERTAS: ${_imgs.join(", ")}');
     _startAuto();
@@ -1610,8 +1486,8 @@ class _OfertasCarruselState extends State<_OfertasCarrusel> {
       child: LayoutBuilder(
         builder: (ctx, cons) {
           final width = cons.maxWidth;
-          const aspect = 2.75;           // relación de aspecto tipo banner
-          final cardWidth = width * .92;  // coincide con viewportFraction
+          const aspect = 2.75;
+          final cardWidth = width * .92;
           final height = cardWidth / aspect;
 
           final dpr = MediaQuery.of(context).devicePixelRatio;
@@ -1652,7 +1528,6 @@ class _OfertasCarruselState extends State<_OfertasCarrusel> {
                               filterQuality: FilterQuality.medium,
                               errorBuilder: (_, __, ___) => _BannerFallback(),
                             ),
-                            // degradado sutil inferior
                             Positioned.fill(
                               child: IgnorePointer(
                                 child: DecoratedBox(
@@ -1676,8 +1551,6 @@ class _OfertasCarruselState extends State<_OfertasCarrusel> {
                     );
                   },
                 ),
-
-                // Indicador de páginas
                 if (_imgs.length > 1)
                   Positioned(
                     bottom: 8,
@@ -1691,10 +1564,7 @@ class _OfertasCarruselState extends State<_OfertasCarrusel> {
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
-                          children: List.generate(
-                            _imgs.length,
-                            (i) => _Dot(active: i == _idx),
-                          ),
+                          children: List.generate(_imgs.length, (i) => _Dot(active: i == _idx)),
                         ),
                       ),
                     ),
@@ -1792,8 +1662,7 @@ class _FiltrosBar extends StatelessWidget {
                 onTap: () => onToggleActivas(!soloActivas),
                 borderRadius: BorderRadius.circular(12),
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   decoration: BoxDecoration(
                     color: cs.surfaceContainerHighest.withOpacity(.6),
                     borderRadius: BorderRadius.circular(12),
@@ -1802,10 +1671,7 @@ class _FiltrosBar extends StatelessWidget {
                     children: [
                       const Text('Solo activas'),
                       const SizedBox(width: 6),
-                      Switch(
-                        value: soloActivas,
-                        onChanged: onToggleActivas,
-                      ),
+                      Switch(value: soloActivas, onChanged: onToggleActivas),
                     ],
                   ),
                 ),
@@ -1834,22 +1700,10 @@ class _FiltrosBar extends StatelessWidget {
                     if (v != null) onOrdenChanged(v);
                   },
                   items: const [
-                    DropdownMenuItem(
-                      value: _Orden.recientes,
-                      child: Text('Más recientes'),
-                    ),
-                    DropdownMenuItem(
-                      value: _Orden.fin,
-                      child: Text('Próximas a vencer'),
-                    ),
-                    DropdownMenuItem(
-                      value: _Orden.mayorOff,
-                      child: Text('Mayor % OFF'),
-                    ),
-                    DropdownMenuItem(
-                      value: _Orden.cercania,
-                      child: Text('Más cerca de mí'),
-                    ),
+                    DropdownMenuItem(value: _Orden.recientes, child: Text('Más recientes')),
+                    DropdownMenuItem(value: _Orden.fin, child: Text('Próximas a vencer')),
+                    DropdownMenuItem(value: _Orden.mayorOff, child: Text('Mayor % OFF')),
+                    DropdownMenuItem(value: _Orden.cercania, child: Text('Más cerca de mí')),
                   ],
                 ),
               ),
@@ -1885,27 +1739,18 @@ class _EmptyState extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.local_offer_outlined,
-                size: 64, color: cs.outline),
+            Icon(Icons.local_offer_outlined, size: 64, color: cs.outline),
             const SizedBox(height: 12),
-            Text(title,
-                style: Theme.of(context).textTheme.titleMedium),
+            Text(title, style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 6),
             Text(
               subtitle,
               textAlign: TextAlign.center,
-              style: Theme.of(context)
-                  .textTheme
-                  .bodyMedium
-                  ?.copyWith(color: cs.outline),
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.outline),
             ),
             if (ctaLabel != null && onCta != null) ...[
               const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed: onCta,
-                icon: const Icon(Icons.add),
-                label: Text(ctaLabel!),
-              ),
+              FilledButton.icon(onPressed: onCta, icon: const Icon(Icons.add), label: Text(ctaLabel!)),
             ],
           ],
         ),
@@ -1922,10 +1767,7 @@ Future<void> _contactarWhatsApp(BuildContext context,
   String? nombre;
   try {
     if (comercioId != null && comercioId.isNotEmpty) {
-      final snap = await FirebaseFirestore.instance
-          .collection('comercios')
-          .doc(comercioId)
-          .get();
+      final snap = await FirebaseFirestore.instance.collection('comercios').doc(comercioId).get();
       final d = snap.data();
       nombre = (d?['nombre'] ?? '').toString();
       tel = (d?['whatsapp'] ?? d?['telefono'] ?? d?['tel'] ?? '').toString();
@@ -1933,36 +1775,28 @@ Future<void> _contactarWhatsApp(BuildContext context,
   } catch (_) {}
   if (tel == null || tel.isEmpty) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-          content:
-              Text('Este comercio no tiene WhatsApp configurado.')),
+      const SnackBar(content: Text('Este comercio no tiene WhatsApp configurado.')),
     );
     return;
   }
   final phone = tel.replaceAll(RegExp(r'[^0-9+]'), '');
-  final msg = Uri.encodeComponent(
-      'Hola ${nombre ?? ''}! Me interesa la oferta "$titulo" que vi en DESCABIO 🛍️');
+  final msg = Uri.encodeComponent('Hola ${nombre ?? ''}! Me interesa la oferta "$titulo" que vi en DESCABIO 🛍️');
   final uri = Uri.parse('https://wa.me/$phone?text=$msg');
   await launchUrl(uri, mode: LaunchMode.externalApplication);
 }
 
-Future<void> _llamarComercio(BuildContext context,
-    {required String? comercioId}) async {
+Future<void> _llamarComercio(BuildContext context, {required String? comercioId}) async {
   String? tel;
   try {
     if (comercioId != null && comercioId.isNotEmpty) {
-      final snap = await FirebaseFirestore.instance
-          .collection('comercios')
-          .doc(comercioId)
-          .get();
+      final snap = await FirebaseFirestore.instance.collection('comercios').doc(comercioId).get();
       final d = snap.data();
       tel = (d?['telefono'] ?? d?['tel'] ?? '').toString();
     }
   } catch (_) {}
   if (tel == null || tel.isEmpty) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-          content: Text('Este comercio no tiene teléfono configurado.')),
+      const SnackBar(content: Text('Este comercio no tiene teléfono configurado.')),
     );
     return;
   }

@@ -412,7 +412,7 @@ class _BebidasPageState extends State<BebidasPage> {
                     const SizedBox(height: 8),
 
                     DropdownButtonFormField<String>(
-                      value: categorias.contains(categoria) ? categoria : 'otras',
+                      initialValue: categorias.contains(categoria) ? categoria : 'otras',
                       items: categorias
                           .map((c) => DropdownMenuItem(value: c, child: Text(_prettyCat(c))))
                           .toList(),
@@ -538,7 +538,7 @@ class _BebidasPageState extends State<BebidasPage> {
 
       if (_fotoTmp != null) {
         await _deleteFotoByPath(data?['fotoPath'] as String?);
-        final up = await _uploadFoto(widget.initialComercioId, editId!);
+        final up = await _uploadFoto(widget.initialComercioId, editId);
         if (up != null) {
           await docRef.update({'fotoUrl': up.url, 'fotoPath': up.path});
         }
@@ -770,14 +770,15 @@ class _BebidasPageState extends State<BebidasPage> {
 
 // ---------- widgets auxiliares ----------
 
+// ---------- widget auxiliar ----------
 class _Pill extends StatelessWidget {
   const _Pill({
-    super.key,
     required this.icon,
     required this.label,
     required this.selected,
     required this.onTap,
     this.tint,
+  
   });
 
   final IconData icon;
@@ -789,10 +790,11 @@ class _Pill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final bg = selected
+
+    final Color fg = selected ? (tint ?? cs.primary) : cs.onSurfaceVariant;
+    final Color bg = selected
         ? (tint ?? cs.primary).withOpacity(.18)
         : cs.surfaceContainerHighest.withOpacity(.45);
-    final fg = selected ? (tint ?? cs.primary) : cs.onSurfaceVariant;
 
     return Material(
       color: bg,
@@ -821,6 +823,7 @@ class _Pill extends StatelessWidget {
     );
   }
 }
+
 
 class _FabNuevo extends StatelessWidget {
   const _FabNuevo({required this.onTap});

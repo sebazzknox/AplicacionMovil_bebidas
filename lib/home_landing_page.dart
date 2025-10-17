@@ -9,6 +9,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'auth/auth_gate.dart';
 import 'splash_screen.dart';
+import 'contacto_card.dart';
 
 import 'admin_panel_page.dart';
 import 'admin_state.dart';
@@ -16,7 +17,6 @@ import 'comercios_page.dart' show ComerciosPage;
 import 'ofertas_page.dart' show OfertasPage;
 import 'promos_destacadas.dart';
 import 'services/analytics_service.dart';
-import 'widgets/animated_filter_chips.dart';
 import 'widgets/glass_search_field.dart';
 import 'widgets/soft_decor.dart';
 import 'widgets/social_links_card.dart';
@@ -356,6 +356,7 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
                     tiktokUrl: 'https://www.tiktok.com/@tu_usuario_tiktok',
                   ),
                   const SizedBox(height: 12),
+                  const ContactoCard(),
                 ],
               ),
             ),
