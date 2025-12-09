@@ -11,6 +11,7 @@ import 'auth/auth_gate.dart';
 import 'splash_screen.dart';
 import 'contacto_card.dart';
 
+import 'aviso_legal.dart';
 import 'admin_panel_page.dart';
 import 'admin_state.dart';
 import 'comercios_page.dart' show ComerciosPage;
@@ -23,6 +24,9 @@ import 'widgets/social_links_card.dart';
 import 'mapa_page.dart';
 import 'mayoristas_page.dart' show MayoristasPage;
 import 'credencial_page.dart';
+
+// ⬇️ NUEVO: aviso legal (se muestra una sola vez)
+import 'widgets/legal_disclaimer.dart';
 
 const String ADMIN_PIN =
     String.fromEnvironment('ADMIN_PIN', defaultValue: '123456');
@@ -82,6 +86,11 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
   void initState() {
     super.initState();
     AppAnalytics.appOpen();
+
+    // ⬇️ NUEVO: Mostrar el aviso legal la primera vez
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      showLegalDisclaimerOnce(context);
+    });
   }
 
   Future<void> _logout(BuildContext context) async {
@@ -357,6 +366,22 @@ class _HomeLandingPageState extends State<HomeLandingPage> {
                   ),
                   const SizedBox(height: 12),
                   const ContactoCard(),
+
+                  // ⬇️ NUEVO: Botón para abrir el aviso legal manualmente
+                  const SizedBox(height: 8),
+                  Center(
+                    child: TextButton.icon(
+                      icon: const Icon(Icons.info_outline),
+                      label: const Text('Aviso legal'),
+                      onPressed: () {
+                      Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const AvisoLegalPage()),
+                    );
+                    },
+
+                    ),
+                  ),
                 ],
               ),
             ),
